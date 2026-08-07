@@ -236,6 +236,18 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
 /// 短くするほど反応が速くなるが、言い淀みで切れやすくなる。
 const HANGOVER: Duration = Duration::from_millis(350);
 
+/// 起動時に環境ノイズを測る時間。しきい値をこれに合わせる。
+const FLOOR_SAMPLE: Duration = Duration::from_millis(400);
+/// 発話とみなす最低の RMS。静かな部屋でも下回らせない。
+const SPEECH_FLOOR: f32 = 0.03;
+/// 窓を開けた直後、スピーカーの残響で誤発火しないよう待つ。
+/// **録音自体は続ける**ので、この間に話し始めても声は残る。
+const GUARD: Duration = Duration::from_millis(200);
+/// これだけ続けて初めて「聞こえた」とみなす。単発のノイズを弾く。
+const MIN_SPEECH: Duration = Duration::from_millis(120);
+/// 監視の刻み。
+const TICK: Duration = Duration::from_millis(25);
+
 /// 入力ストリームを開きっぱなしにして持ち回す。
 ///
 /// 呼ばれるたびに開き直すと、CoreAudio / ALSA のデバイス初期化に
@@ -245,6 +257,8 @@ pub struct Ears {
     _stream: cpal::Stream,
     buf: Arc<Mutex<Vec<f32>>>,
     rate: u32,
+    /// 発話とみなす RMS。起動時の環境ノイズから決める。
+    threshold: f32,
 }
 
 impl Ears {
@@ -288,10 +302,21 @@ impl Ears {
         };
         stream.play()?;
 
+        // 環境ノイズを測ってしきい値を決める。部屋の静かさは
+        // 環境によって桁が違うので、固定値だと誤発火か取りこぼしになる。
+        std::thread::sleep(FLOOR_SAMPLE);
+        let floor = {
+            let b = buf.lock().unwrap();
+            rms(&b)
+        };
+        let threshold = (floor * 4.0).max(SPEECH_FLOOR);
+        eprintln!("  環境ノイズ {floor:.4} → しきい値 {threshold:.4}");
+
         Ok(Self {
             _stream: stream,
             buf,
             rate,
+            threshold,
         })
     }
 
@@ -306,35 +331,62 @@ impl Ears {
         // 歌が溜まっている。窓を開ける前に捨てる。
         self.buf.lock().unwrap().clear();
 
-        // 25ms ごとに直近 200ms の振幅を見て、声が途切れたら打ち切る。
         let window = (self.rate as usize / 5).max(1);
         let start = Instant::now();
+        let mut voiced = Duration::ZERO;
         let mut heard = false;
         let mut quiet_since: Option<Instant> = None;
+
         while start.elapsed() < max {
-            std::thread::sleep(Duration::from_millis(25));
+            std::thread::sleep(TICK);
             let level = {
                 let b = self.buf.lock().unwrap();
-                let tail = &b[b.len().saturating_sub(window)..];
-                tail.iter().fold(0.0f32, |m, s| m.max(s.abs()))
+                rms(&b[b.len().saturating_sub(window)..])
             };
-            if level > SILENCE {
-                heard = true;
+
+            // 窓を開けた直後はスピーカーの残響が残っている。
+            // ここで「聞こえた」と判定すると即座に打ち切ってしまう。
+            if start.elapsed() < GUARD {
+                continue;
+            }
+
+            if level > self.threshold {
+                // 単発のノイズで発火しないよう、続いた時間を見る。
+                voiced += TICK;
+                if voiced >= MIN_SPEECH {
+                    heard = true;
+                }
                 quiet_since = None;
-            } else if heard {
-                let since = *quiet_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= HANGOVER {
-                    break;
+            } else {
+                voiced = Duration::ZERO;
+                if heard {
+                    let since = *quiet_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= HANGOVER {
+                        break;
+                    }
                 }
             }
         }
 
+        eprintln!(
+            "  {} （{:.1}秒待った）",
+            if heard { "聞こえた" } else { "無言" },
+            start.elapsed().as_secs_f32()
+        );
         if !heard {
             return Ok(None);
         }
         let raw = self.buf.lock().unwrap().clone();
         Ok(Some(resample(&raw, self.rate, WHISPER_SR)))
     }
+}
+
+/// 二乗平均平方根。ピーク値だと単発のノイズに引っ張られる。
+fn rms(xs: &[f32]) -> f32 {
+    if xs.is_empty() {
+        return 0.0;
+    }
+    (xs.iter().map(|x| x * x).sum::<f32>() / xs.len() as f32).sqrt()
 }
 
 /// 線形補間でリサンプルする。音声認識に渡すだけなのでこれで足りる。

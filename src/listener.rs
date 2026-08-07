@@ -42,6 +42,7 @@ mod mic {
 
     use super::Listener;
     use crate::audio::{Ears, WHISPER_SR};
+    use crate::color::Color;
 
     /// モデルも状態も起動時に一度だけ作る。
     ///
@@ -50,6 +51,22 @@ mod mic {
     pub struct Mic {
         state: whisper_rs::WhisperState,
         ears: Ears,
+        /// whisper に「こういう言葉が来る」と教える文。
+        prompt: String,
+    }
+
+    /// 認識対象の語をひらがなで並べた文を作る。
+    ///
+    /// これを与えないと whisper が漢字に変換してしまう。実際に
+    /// 「むらさき」が「村先」になった。同音の漢字は無限にあるので、
+    /// 読みを足していく方式では追いつかない。出力そのものを寄せる。
+    fn vocabulary() -> String {
+        let mut words: Vec<&str> = Color::ALL
+            .iter()
+            .filter_map(|c| c.readings().first().copied())
+            .collect();
+        words.push("ぜんぶ");
+        words.join("、") + "。"
     }
 
     impl Mic {
@@ -63,7 +80,13 @@ mod mic {
             let ctx = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
                 .with_context(|| format!("モデルを読めない: {path}"))?;
             let state = ctx.create_state()?;
-            Ok(Self { state, ears })
+            let prompt = vocabulary();
+            eprintln!("  語彙: {prompt}");
+            Ok(Self {
+                state,
+                ears,
+                prompt,
+            })
         }
 
         fn transcribe(&mut self, pcm: &[f32]) -> Option<String> {
@@ -72,6 +95,9 @@ mod mic {
 
             // 語彙が色名に閉じているので、言語を固定して迷わせない。
             params.set_language(Some("ja"));
+            // 出てくる語をあらかじめ教えて、漢字変換や言い換えを抑える。
+            // no_context とは独立に効く（prompt_tokens 経由）。
+            params.set_initial_prompt(&self.prompt);
             params.set_translate(false);
             params.set_print_special(false);
             params.set_print_progress(false);

@@ -61,7 +61,8 @@ impl Color {
             Color::Black => &["くろ", "黒"],
             Color::Pink => &["ぴんく", "ぴんこ", "ももいろ", "桃色"],
             Color::Orange => &["おれんじ", "おえんじ", "だいだい", "橙"],
-            Color::Purple => &["むらさき", "紫", "むあさき"],
+            // 「村先」は実際に化けた形。initial_prompt で抑えるのが本筋だが保険。
+            Color::Purple => &["むらさき", "紫", "むあさき", "村先", "村咲"],
             Color::Brown => &["ちゃいろ", "茶色"],
             Color::LightBlue => &["みずいろ", "水色"],
         }
