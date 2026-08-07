@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # whisper のモデルを models/ に取ってくる。
 #
-#   tools/fetch-model.sh          base（既定・141MB）
-#   tools/fetch-model.sh tiny     小さくて速い（74MB）
+#   tools/fetch-model.sh          tiny（既定・74MB）
+#   tools/fetch-model.sh base     大きい（141MB）
 #
-# 既定は base。tiny でも大人の声なら足りたが、子どもの声では精度が
-# 落ちたため戻した。速度より当たることを優先する。
+# 子どもの声で精度が落ちたとき、モデルを大きくするより audio_ctx を
+# 戻すほうが効いた。tiny のまま文脈を full にすれば base より速くて
+# 精度も出る。
 #
 # モデルはリポジトリには置かない（LFS の無駄）。
 # 使うモデルは DONNA_IRO_MODEL で切り替える。
@@ -14,7 +15,7 @@
 
 set -euo pipefail
 
-MODEL="${1:-base}"
+MODEL="${1:-tiny}"
 case "$MODEL" in
   tiny | base | small | medium | large-v3 | large-v3-turbo) ;;
   *)
@@ -52,8 +53,8 @@ fi
 mv "$FILE.part" "$FILE"
 echo "完了: $FILE ($(du -h "$FILE" | cut -f1))"
 
-if [ "$MODEL" != "base" ]; then
+if [ "$MODEL" != "tiny" ]; then
   echo
-  echo "既定は models/ggml-base.bin です。これを使うには:"
+  echo "既定は models/ggml-tiny.bin です。これを使うには:"
   echo "  DONNA_IRO_MODEL=$FILE cargo run"
 fi
