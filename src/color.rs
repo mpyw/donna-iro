@@ -63,6 +63,26 @@ impl Color {
         }
     }
 
+    /// 漢字表記。`initial_prompt` は誘導であって強制ではないので、
+    /// whisper は漢字を返すことがある。ひらがなに機械変換できないため、
+    /// 判定用に一形だけ持っておく。カタカナ表記の色は正規化で
+    /// ひらがなに寄るので不要。
+    pub fn kanji(&self) -> Option<&'static str> {
+        match self {
+            Color::Red => Some("赤"),
+            Color::Blue => Some("青"),
+            Color::Yellow => Some("黄色"),
+            Color::Green => Some("緑"),
+            Color::YellowGreen => Some("黄緑"),
+            Color::White => Some("白"),
+            Color::Black => Some("黒"),
+            Color::Purple => Some("紫"),
+            Color::Brown => Some("茶色"),
+            Color::LightBlue => Some("水色"),
+            Color::Pink | Color::Orange => None,
+        }
+    }
+
     /// ターミナルに描く●の色。クレヨン12色の実際の色味に寄せてある。
     pub fn rgb(&self) -> Rgb {
         match self {

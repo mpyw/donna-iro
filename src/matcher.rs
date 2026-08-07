@@ -22,6 +22,9 @@ pub enum Answer {
 
 /// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
 pub const ALL_READING: &str = "ぜんぶ";
+/// 同じものの漢字表記。`initial_prompt` は誘導であって強制ではないので、
+/// whisper は漢字を返すことがある。実際に「全部」が出た。
+const ALL_KANJI: &str = "全部";
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -84,6 +87,12 @@ impl Matcher {
             candidates.push((Answer::Color(c), normalize(c.reading())));
         }
         candidates.push((Answer::All, normalize(ALL_READING)));
+        candidates.push((Answer::All, normalize(ALL_KANJI)));
+        for c in Color::ALL {
+            if let Some(k) = c.kanji() {
+                candidates.push((Answer::Color(c), normalize(k)));
+            }
+        }
         // 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
         // あるので、部分一致は長い読みから試さないと取りこぼす。
         candidates.sort_by_key(|(_, r)| std::cmp::Reverse(r.chars().count()));
@@ -143,24 +152,47 @@ impl Matcher {
     }
 }
 
-/// ひらがな以外で区切る。
+/// 句読点で区切る。
 ///
 /// whisper が不明瞭な音を受け取ると、`initial_prompt` に渡した語彙を
 /// そのまま並べて返すことがある。実際に「あお、きいろ、みどり、しろ、みど」
 /// が出た。区切らずに繋げると、部分一致が長い読みから探すせいで
-/// 途中の「きいろ」を拾ってしまう。
+/// 途中の「きいろ」を拾ってしまう。区切って先頭から見れば、
+/// 最初に言われた色を優先できる。
 ///
-/// 区切って先頭から見れば、最初に言われた色を優先できる。
+/// **ひらがな以外を境界にしてはいけない。** 漢字が区間から消えるので、
+/// 「全部」がまるごと落ちる。実際にそうなった。
 fn segments(s: &str) -> Vec<String> {
-    s.split(|c: char| !is_kana(c))
+    s.split(is_separator)
         .filter(|seg| !seg.is_empty())
         .map(str::to_string)
         .collect()
 }
 
-fn is_kana(c: char) -> bool {
-    let u = c as u32;
-    (0x3041..=0x3096).contains(&u) || c == 'ー'
+fn is_separator(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '、' | '。'
+                | '，'
+                | '．'
+                | ','
+                | '.'
+                | '!'
+                | '?'
+                | '！'
+                | '？'
+                | '「'
+                | '」'
+                | '（'
+                | '）'
+                | '('
+                | ')'
+                | '・'
+                | '〜'
+                | '~'
+                | '/'
+        )
 }
 
 /// カタカナをひらがなに寄せ、空白を落とす。
@@ -337,6 +369,16 @@ mod tests {
     #[test]
     fn unrelated_speech_is_rejected() {
         assert_eq!(find("おかあさん"), None);
+    }
+
+    #[test]
+    fn kanji_is_matched() {
+        // initial_prompt は誘導であって強制ではないので漢字は出る。
+        assert_eq!(find("全部"), Some(Answer::All));
+        assert_eq!(find("赤"), c(Color::Red));
+        assert_eq!(find("黄色"), c(Color::Yellow));
+        assert_eq!(find("黄緑"), c(Color::YellowGreen));
+        assert_eq!(find("水色"), c(Color::LightBlue));
     }
 
     #[test]
