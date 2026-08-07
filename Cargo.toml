@@ -13,10 +13,19 @@ whisper = ["dep:whisper-rs"]
 # include_bytes! はコンパイル時にファイルを要求するので、
 # assets/*.wav が揃うまでは有効にできない。
 embed = []
-# Mac の GPU / Neural Engine を使う。認識が数倍速くなる。
+# --- 認識の加速。プラットフォームごとに使えるものが違う ---
+#
+# Apple 専用。ラズパイでは使えない。
 #   cargo build --release --features metal
 metal = ["whisper-rs?/metal"]
 coreml = ["whisper-rs?/coreml"]
+#
+# ラズパイ側の選択肢。素の状態でも whisper.cpp が NEON を使うので
+# まずは無指定で測り、足りなければ試す。
+#   sudo apt install libopenblas-dev
+#   cargo build --release --features openblas
+openblas = ["whisper-rs?/openblas"]
+openmp = ["whisper-rs?/openmp"]
 
 [dependencies]
 anyhow = "1"
