@@ -132,7 +132,7 @@ impl Clip {
 /// `rodio::Decoder` に渡すため、どちらも同じ型にまとめる。
 enum Media {
     File(BufReader<File>),
-    #[cfg(feature = "embed")]
+    #[cfg(feature = "embed-audio")]
     Memory(std::io::Cursor<&'static [u8]>),
 }
 
@@ -142,7 +142,7 @@ impl Media {
 
         // 埋め込みがあり、かつディレクトリ指定で上書きされていなければ
         // バイナリの中から鳴らす。
-        #[cfg(feature = "embed")]
+        #[cfg(feature = "embed-audio")]
         if asset_dir_override().is_none() {
             let bytes =
                 embedded(stem).with_context(|| format!("埋め込まれていない素材: {stem}"))?;
@@ -159,7 +159,7 @@ impl Read for Media {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Media::File(f) => f.read(buf),
-            #[cfg(feature = "embed")]
+            #[cfg(feature = "embed-audio")]
             Media::Memory(c) => c.read(buf),
         }
     }
@@ -169,7 +169,7 @@ impl Seek for Media {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match self {
             Media::File(f) => f.seek(pos),
-            #[cfg(feature = "embed")]
+            #[cfg(feature = "embed-audio")]
             Media::Memory(c) => c.seek(pos),
         }
     }
@@ -190,14 +190,14 @@ fn asset_path(stem: &str) -> PathBuf {
 
 /// 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動かせる。
 ///
-///     cargo build --release --features embed
+///     cargo build --release --features embed-audio
 ///
 /// `include_bytes!` はコンパイル時にファイルを要求するので、
 /// 音源が揃うまではこのフィーチャーを有効にできない。
 ///
-/// なお whisper のモデルは 141MB あるので埋め込まない。別ファイルのまま
-/// `DONNA_IRO_MODEL` で場所を指す。
-#[cfg(feature = "embed")]
+/// モデルのほうは `embed-model` で埋め込む。両方入れると
+/// バイナリ1つで完結する。
+#[cfg(feature = "embed-audio")]
 fn embedded(stem: &str) -> Option<&'static [u8]> {
     macro_rules! table {
         ($($name:literal),* $(,)?) => {

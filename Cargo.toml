@@ -9,14 +9,20 @@ default = ["whisper", "window"]
 #   cargo run --no-default-features   → キーボード入力（再生の確認用、すぐ起動する）
 #   cargo run                         → マイク入力
 whisper = ["dep:whisper-rs"]
-# 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動く。
-# include_bytes! はコンパイル時にファイルを要求するので、
-# assets/*.wav が揃うまでは有効にできない。
 # ウィンドウに丸を描く。テレビに映すのはこちらが本命。
 # 外すとターミナルに色名を出すだけになる。
 window = ["dep:minifb"]
 
-embed = []
+# --- バイナリへの埋め込み ---
+#
+# include_bytes! はコンパイル時に実体を要求するので、先に取得しておくこと。
+#   git -C assets lfs pull && tools/fetch-model.sh
+#   cargo build --release --features embed
+#
+# 両方入れて 88MB。1ファイル置くだけで、音源もモデルも要らずに動く。
+embed-audio = []
+embed-model = []
+embed = ["embed-audio", "embed-model"]
 # --- 認識の加速。プラットフォームごとに使えるものが違う ---
 #
 # Apple 専用。ラズパイでは使えない。

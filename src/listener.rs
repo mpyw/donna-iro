@@ -72,14 +72,7 @@ mod mic {
             // ロガーを入れていないので、そのまま捨てられる。
             whisper_rs::install_logging_hooks();
 
-            // tiny で足りることを実機で確認済み。語彙が12色に閉じていて
-            // initial_prompt で誘導し、さらに編集距離で吸収するので、
-            // 大きいモデルを積む理由がない。base に上げたければ
-            // DONNA_IRO_MODEL で差し替える。
-            let path = std::env::var("DONNA_IRO_MODEL")
-                .unwrap_or_else(|_| "models/ggml-tiny.bin".to_string());
-            let ctx = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
-                .with_context(|| format!("モデルを読めない: {path}"))?;
+            let ctx = load_model()?;
             let state = ctx.create_state()?;
             let prompt = vocabulary();
             eprintln!("  語彙: {prompt}");
@@ -158,6 +151,39 @@ mod mic {
                 Some(pcm) => Ok(self.transcribe(&pcm)),
                 None => Ok(None),
             }
+        }
+    }
+
+    /// tiny で足りることを実機で確認済み。語彙が12色に閉じていて
+    /// `initial_prompt` で誘導し、さらに編集距離で吸収するので、
+    /// 大きいモデルを積む理由がない。
+    ///
+    /// `DONNA_IRO_MODEL` を指定すればファイルから読む。埋め込みビルドでも
+    /// これが優先されるので、base に上げたいときに使える。
+    fn load_model() -> Result<WhisperContext> {
+        if let Ok(path) = std::env::var("DONNA_IRO_MODEL") {
+            return WhisperContext::new_with_params(&path, WhisperContextParameters::default())
+                .with_context(|| format!("モデルを読めない: {path}"));
+        }
+
+        // whisper.cpp はバッファから読むだけで書き換えないので、
+        // 読み取り専用の静的領域をそのまま渡してよい。
+        #[cfg(feature = "embed-model")]
+        {
+            const MODEL: &[u8] =
+                include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ggml-tiny.bin"));
+            return WhisperContext::new_from_buffer_with_params(
+                MODEL,
+                WhisperContextParameters::default(),
+            )
+            .context("埋め込みモデルを読めない");
+        }
+
+        #[cfg(not(feature = "embed-model"))]
+        {
+            let path = "models/ggml-tiny.bin";
+            WhisperContext::new_with_params(path, WhisperContextParameters::default())
+                .with_context(|| format!("モデルを読めない: {path}（tools/fetch-model.sh で取得）"))
         }
     }
 

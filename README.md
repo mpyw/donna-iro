@@ -49,7 +49,9 @@ DONNA_IRO_ASSETS=assets/reference ./target/release/donna-iro
 | --- | --- |
 | `whisper` | 音声認識。外すとキーボード入力のみ（ビルドが数十秒で済む） |
 | `window` | ウィンドウ描画。外すとターミナルに色名だけ |
-| `embed` | 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動く |
+| `embed-audio` | 音源をバイナリに埋め込む |
+| `embed-model` | whisper のモデル（tiny・74MB）も埋め込む |
+| `embed` | 上の2つ。**88MB のバイナリ1つで完結**する |
 | `metal` / `coreml` | **Apple 専用。** ラズパイでは使えない |
 | `openblas` / `openmp` | ラズパイ側の加速。素でも NEON は使うので、まず無指定で測る |
 
