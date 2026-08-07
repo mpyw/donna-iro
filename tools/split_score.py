@@ -120,7 +120,9 @@ def build(root, measures, name, spans, fifths, mods=None):
 
     for pid in ("P1", "P2"):
         part = ET.SubElement(out, "part", {"id": pid})
-        for i, num in enumerate(spans):
+        # パートごとに違う小節を並べたい場合は dict で渡す
+        seq = spans[pid] if isinstance(spans, dict) else spans
+        for i, num in enumerate(seq):
             src = measures[pid].get(num)
             m = copy.deepcopy(src) if src is not None else ET.Element("measure")
             m.set("number", str(i + 1))
@@ -258,10 +260,10 @@ NEW = {
 # 参考: 原曲の1行目は [9,3][9,3][12][9,3] という4拍。
 # 伸ばす分を1・2拍目で吸収し、3・4拍目は原曲の形をそのまま残す。
 HOLD_L1 = {
-    # 1拍目 し(12) / 2拍目 ー(6) ろ(3) い(3) / 3拍目 い(9) ろ(3) / 4拍目 が(9) す(3)
-    "white": [12, 6, 3, 3, 9, 3, 9, 3],
-    # 1拍目 み(12) / 2拍目 ー(6) ず(3) い(3) / 3拍目 ろ(12)   / 4拍目 が(9) す(3)
-    "lightblue": [12, 6, 3, 3, 12, 9, 3],
+    # し ー ろ い い ろ が す → [9+3]×4。「きいろ」の節と完全に同じリズム。
+    "white": [9, 3, 9, 3, 9, 3, 9, 3],
+    # み ー ず い ろ が す → [9+3][9+3][12][9+3]。「あか」の節と完全に同じリズム。
+    "lightblue": [9, 3, 9, 3, 12, 9, 3],
 }
 
 # 「ー」を置く音符の位置（1行目の何音目か、0始まり）。
@@ -286,13 +288,42 @@ def unify_pitch(measure, i):
     cur.insert(0, copy.deepcopy(prev))
 
 
+
+def add_pickup(measure):
+    """間奏冒頭の休符（0.75拍）を、原曲 m27 末尾の助走に置き換える。
+
+    原曲では B5(0.25) C6(0.75) D6(0.25) の1.25拍だが、
+    小節の頭に収めるため16分3つ（0.25×3）に詰める。
+    """
+    lead = [("B", 5, 0), ("C", 6, 0), ("D", 6, 0)]
+    rests = [n for n in measure.findall("note") if n.find("rest") is not None]
+    head = rests[:2]                      # 冒頭の 6 + 3 = 9 divisions
+    assert sum(int(n.findtext("duration")) for n in head) == 9, "冒頭が想定と違う"
+    idx = list(measure).index(head[0])
+    for n in head:
+        measure.remove(n)
+    model = pitched(measure)[0]
+    for k, (step, octv, alter) in enumerate(lead):
+        n = copy.deepcopy(model)
+        for ly in n.findall("lyric"):
+            n.remove(ly)
+        p = n.find("pitch")
+        p.find("step").text = step
+        p.find("octave").text = str(octv)
+        for a in p.findall("alter"):
+            p.remove(a)
+        set_duration(n, 3)
+        measure.insert(idx + k, n)
+
+
 def main():
     root, measures = load()
     made = []
 
     def emit(name, spans, fifths, mods=None):
         out = build(root, measures, name, spans, fifths, mods)
-        made.append((name, len(spans), write(out, name)))
+        n = len(spans["P1"]) if isinstance(spans, dict) else len(spans)
+        made.append((name, n, write(out, name)))
         return out
 
     # --- 構造パート ---
@@ -303,7 +334,16 @@ def main():
     emit("question", rng(4, 5), 1,
          lambda pid, num, m: mute_melody(m, 2.0) if pid == "P1" and num == "5" else None)
 
-    emit("bridge", rng(40, 47), 1)
+    # ブリッジ。
+    #
+    # 原曲 m47（2回目の終わり）のピアノには D#4 / A#4 / G#2 という
+    # ト長調の音階外の音が入っていて、次の m48 の転調を準備している。
+    # ループで質問（ト長調）に戻る用途では持ち上がったまま戻ってしまう。
+    # 1回目の終わりである m43 は音階内で完結しているので、
+    # 最終小節のピアノだけ m43 に差し替える。
+    # 旋律は m47 のまま（m43 の A5 B5 は繰り返しへの助走なので使わない）。
+    emit("bridge", {"P1": rng(40, 47),
+                    "P2": rng(40, 46) + ["43"]}, 1)
 
     # 間奏。
     #
@@ -311,7 +351,15 @@ def main():
     # 3音の助走（B5 C6 D6）を拾うために含めていたが、m27 の伴奏は
     # どの節の最終小節とも完全に同一なので、節のあとに間奏を流すと
     # 同じ伴奏が2小節続いてしまう。助走を捨てて m28 から始める。
-    emit("interlude", rng(28, 31), 1)
+    # 間奏。
+    #
+    # m27 は「きいろ」の節の最終小節であって間奏ではない。その伴奏は
+    # どの節の最終小節とも完全に同一なので、含めると同じ伴奏が2小節続く。
+    # かわりに m27 末尾の助走（B5 C6 D6）を m28 冒頭の休符に詰めて置く。
+    # 助走を単に捨てると、節の3拍の休みと間奏頭の0.75拍が繋がって
+    # 旋律のない時間が約1.8秒でき、繋がって聴こえなくなる。
+    emit("interlude", rng(28, 31), 1,
+         lambda pid, num, m: add_pickup(m) if pid == "P1" and num == "28" else None)
 
     # ぜんぶ＋エンディング。
     #

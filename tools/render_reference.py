@@ -71,7 +71,16 @@ def collect(part):
                     pos += d
                 p = el.find("pitch")
                 if p is not None:
-                    events.append((base + start, d, p))
+                    # 歌詞が「ー」の音は母音の継続。直前の音に足して
+                    # 1つの持続音として鳴らす。別音符として発音し直すと
+                    # 「みー」が「みみ」のように音節が増えて聴こえてしまう。
+                    ly = el.find("lyric")
+                    text = ly.findtext("text") if ly is not None else None
+                    if text == "ー" and events:
+                        ps, pd, pp = events[-1]
+                        events[-1] = (ps, pd + d, pp)
+                    else:
+                        events.append((base + start, d, p))
             elif el.tag == "backup":
                 pos -= int(el.findtext("duration"))
             elif el.tag == "forward":
