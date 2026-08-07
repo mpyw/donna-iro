@@ -13,6 +13,10 @@ whisper = ["dep:whisper-rs"]
 # include_bytes! はコンパイル時にファイルを要求するので、
 # assets/*.wav が揃うまでは有効にできない。
 embed = []
+# Mac の GPU / Neural Engine を使う。認識が数倍速くなる。
+#   cargo build --release --features metal
+metal = ["whisper-rs?/metal"]
+coreml = ["whisper-rs?/coreml"]
 
 [dependencies]
 anyhow = "1"
@@ -24,4 +28,4 @@ cpal = "0.15"
 rodio = "0.19"
 
 # 音声認識: whisper.cpp の Rust バインディング
-whisper-rs = { version = "0.16", optional = true }
+whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }

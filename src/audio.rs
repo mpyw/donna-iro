@@ -94,7 +94,8 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
 /// 無音とみなす振幅。マイクのノイズフロアより上、囁き声より下を狙う。
 const SILENCE: f32 = 0.02;
 /// 声が途切れてから打ち切るまでの猶予。
-const HANGOVER: Duration = Duration::from_millis(600);
+/// 短くするほど反応が速くなるが、言い淀みで切れやすくなる。
+const HANGOVER: Duration = Duration::from_millis(350);
 
 /// 応答を待って録音する。16kHz モノラルの f32 を返す。
 ///
@@ -142,13 +143,13 @@ pub fn listen(max: Duration) -> Result<Option<Vec<f32>>> {
     };
     stream.play()?;
 
-    // 50ms ごとに直近 200ms の振幅を見て、声が途切れたら打ち切る。
+    // 25ms ごとに直近 200ms の振幅を見て、声が途切れたら打ち切る。
     let window = (sample_rate as usize / 5).max(1);
     let start = Instant::now();
     let mut heard = false;
     let mut quiet_since: Option<Instant> = None;
     while start.elapsed() < max {
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(25));
         let level = {
             let b = buf.lock().unwrap();
             let tail = &b[b.len().saturating_sub(window)..];

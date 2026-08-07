@@ -1,16 +1,17 @@
 //! ターミナルに色の●を描く。
 //!
-//! PNG を用意してアスキーアートに変換する手もあるが、素材の管理と
-//! 画像デコードの依存が増えるうえ、変換で色が濁る。丸は手で描ける
-//! 形なので、ANSI の24bitカラーで直接打つ。
+//! 半角ブロック「▀」で縦2ピクセルを1文字に詰める手もあるが、フォントに
+//! グリフが無いと代替フォントに落ちて高さが揃わず、縞模様に崩れる。
 //!
-//! 上半分ブロック「▀」の前景色と背景色に別々の色を入れると、
-//! 1文字で縦2ピクセルぶん塗れる。ターミナルのセルは縦長なので、
-//! これでピクセルがほぼ正方形になり、丸が丸く見える。
+//! ここでは**背景色を塗った空白**だけで描く。特殊なグリフを一切使わない
+//! ので、どのターミナルでも同じに出る。ターミナルのセルは横1:縦2くらい
+//! なので、1ピクセルを空白2つぶんの幅にすると丸が丸く見える。
 
 pub type Rgb = (u8, u8, u8);
 
 const RESET: &str = "\x1b[0m";
+/// 1ピクセルの横幅（文字数）。セルが縦長なので2つ並べて正方形に近づける。
+const PX: usize = 2;
 
 /// 縁の色。白い●と黒い●が背景に溶けないよう、明るい色は暗く、
 /// 暗い色は明るくずらしたリングを1ピクセル分描く。
@@ -36,53 +37,42 @@ fn hit(x: i32, y: i32, r: i32) -> Option<bool> {
     }
 }
 
-fn paint(c: Rgb, on_edge: bool) -> Rgb {
-    if on_edge {
-        edge(c)
-    } else {
-        c
-    }
-}
-
-fn cell(top: Option<Rgb>, bottom: Option<Rgb>) -> String {
-    match (top, bottom) {
-        (None, None) => " ".to_string(),
-        (Some(t), None) => format!("\x1b[38;2;{};{};{}m▀{RESET}", t.0, t.1, t.2),
-        (None, Some(b)) => format!("\x1b[38;2;{};{};{}m▄{RESET}", b.0, b.1, b.2),
-        (Some(t), Some(b)) => format!(
-            "\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m▀{RESET}",
-            t.0, t.1, t.2, b.0, b.1, b.2
-        ),
-    }
+fn fill(c: Rgb) -> String {
+    format!(
+        "\x1b[48;2;{};{};{}m{}{RESET}",
+        c.0,
+        c.1,
+        c.2,
+        " ".repeat(PX)
+    )
 }
 
 /// 色を横に並べて描く。半径 `r` はピクセル単位。
 pub fn render(colors: &[Rgb], r: i32, gap: usize) -> String {
     let mut out = String::new();
-    let mut y = -r;
-    while y <= r {
+    for y in -r..=r {
         for (i, &c) in colors.iter().enumerate() {
             if i > 0 {
-                out.push_str(&" ".repeat(gap));
+                out.push_str(&" ".repeat(gap * PX));
             }
             for x in -r..=r {
-                let t = hit(x, y, r).map(|e| paint(c, e));
-                let b = hit(x, y + 1, r).map(|e| paint(c, e));
-                out.push_str(&cell(t, b));
+                match hit(x, y, r) {
+                    None => out.push_str(&" ".repeat(PX)),
+                    Some(on_edge) => out.push_str(&fill(if on_edge { edge(c) } else { c })),
+                }
             }
         }
         out.push('\n');
-        y += 2;
     }
     out
 }
 
 /// 1色を大きく。色のフレーズを歌っている間に出す。
 pub fn one(c: Rgb) -> String {
-    render(&[c], 9, 0)
+    render(&[c], 7, 0)
 }
 
 /// 全色を横並びに。質問・区切り・「ぜんぶ」のときに出す。
 pub fn all(colors: &[Rgb]) -> String {
-    render(colors, 4, 1)
+    render(colors, 3, 1)
 }
