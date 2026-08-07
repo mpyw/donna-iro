@@ -9,14 +9,17 @@ use anyhow::Result;
 /// 認識対象の色。語彙をこれだけに閉じることで、
 /// 汎用 ASR に頼らずとも判定できるようにする。
 ///
-/// 2歳児が実際に口にする色を優先して選んである。
-/// はいいろ・きんいろ等はまず言わないので入れていない。
+/// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
+/// （しろ・きいろ・きみどり・みどり・みずいろ・あお・むらさき・
+/// ももいろ・あか・だいだい・ちゃいろ・くろ）を基準に選んである。
+/// そこに こん・はいいろ と、子どもが好きな きんいろ・ぎんいろ を足した16色。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Color {
     Red,
     Blue,
     Yellow,
     Green,
+    YellowGreen,
     White,
     Black,
     Pink,
@@ -24,14 +27,19 @@ enum Color {
     Purple,
     Brown,
     LightBlue,
+    Navy,
+    Gray,
+    Gold,
+    Silver,
 }
 
 impl Color {
-    const ALL: [Color; 11] = [
+    const ALL: [Color; 16] = [
         Color::Red,
         Color::Blue,
         Color::Yellow,
         Color::Green,
+        Color::YellowGreen,
         Color::White,
         Color::Black,
         Color::Pink,
@@ -39,25 +47,40 @@ impl Color {
         Color::Purple,
         Color::Brown,
         Color::LightBlue,
+        Color::Navy,
+        Color::Gray,
+        Color::Gold,
+        Color::Silver,
     ];
 
     /// 認識結果の文字列にマッチさせる読み。表記ゆれと幼児の発音ゆれを吸収する。
     ///
-    /// マッチは**長い読みから順に**試すこと。「みずいろ」を「いろ」で
-    /// 拾ってしまうような取りこぼしを避けるため。
+    /// マッチは**必ず長い読みから順に**試すこと。短い色名が長い色名に
+    /// 含まれる組み合わせがあるため、素朴に前から探すと誤判定する。
+    ///
+    /// - 「きみどり」⊃「みどり」
+    /// - 「きんいろ」「ぎんいろ」「みずいろ」「ちゃいろ」「はいいろ」⊃「いろ」
+    ///
+    /// 「ももいろ」はピンク、「だいだい」はオレンジの読みとして扱う。
+    /// クレヨンの表記と子どもが言う語が違うため、両方拾えるようにしてある。
     fn readings(&self) -> &'static [&'static str] {
         match self {
             Color::Red => &["あか", "アカ", "赤"],
             Color::Blue => &["あお", "アオ", "青"],
             Color::Yellow => &["きいろ", "キイロ", "黄色", "きーろ", "きいく"],
             Color::Green => &["みどり", "ミドリ", "緑", "みろり"],
+            Color::YellowGreen => &["きみどり", "キミドリ", "黄緑", "きみろり"],
             Color::White => &["しろ", "シロ", "白"],
             Color::Black => &["くろ", "クロ", "黒"],
-            Color::Pink => &["ぴんく", "ピンク", "ぴんこ"],
-            Color::Orange => &["おれんじ", "オレンジ", "おえんじ"],
+            Color::Pink => &["ぴんく", "ピンク", "ぴんこ", "ももいろ", "桃色"],
+            Color::Orange => &["おれんじ", "オレンジ", "おえんじ", "だいだい", "橙"],
             Color::Purple => &["むらさき", "ムラサキ", "紫", "むあさき"],
             Color::Brown => &["ちゃいろ", "チャイロ", "茶色"],
             Color::LightBlue => &["みずいろ", "ミズイロ", "水色"],
+            Color::Navy => &["こん", "コン", "紺", "こんいろ", "紺色"],
+            Color::Gray => &["はいいろ", "ハイイロ", "灰色", "ぐれー", "グレー"],
+            Color::Gold => &["きんいろ", "キンイロ", "金色", "きん", "ゴールド"],
+            Color::Silver => &["ぎんいろ", "ギンイロ", "銀色", "ぎん", "シルバー"],
         }
     }
 
@@ -72,6 +95,7 @@ impl Color {
             Color::Blue => "assets/blue.wav",
             Color::Yellow => "assets/yellow.wav",
             Color::Green => "assets/green.wav",
+            Color::YellowGreen => "assets/yellowgreen.wav",
             Color::White => "assets/white.wav",
             Color::Black => "assets/black.wav",
             Color::Pink => "assets/pink.wav",
@@ -79,6 +103,10 @@ impl Color {
             Color::Purple => "assets/purple.wav",
             Color::Brown => "assets/brown.wav",
             Color::LightBlue => "assets/lightblue.wav",
+            Color::Navy => "assets/navy.wav",
+            Color::Gray => "assets/gray.wav",
+            Color::Gold => "assets/gold.wav",
+            Color::Silver => "assets/silver.wav",
         }
     }
 }
