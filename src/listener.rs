@@ -72,8 +72,12 @@ mod mic {
             // ロガーを入れていないので、そのまま捨てられる。
             whisper_rs::install_logging_hooks();
 
+            // tiny で足りることを実機で確認済み。語彙が12色に閉じていて
+            // initial_prompt で誘導し、さらに編集距離で吸収するので、
+            // 大きいモデルを積む理由がない。base に上げたければ
+            // DONNA_IRO_MODEL で差し替える。
             let path = std::env::var("DONNA_IRO_MODEL")
-                .unwrap_or_else(|_| "models/ggml-base.bin".to_string());
+                .unwrap_or_else(|_| "models/ggml-tiny.bin".to_string());
             let ctx = WhisperContext::new_with_params(&path, WhisperContextParameters::default())
                 .with_context(|| format!("モデルを読めない: {path}"))?;
             let state = ctx.create_state()?;

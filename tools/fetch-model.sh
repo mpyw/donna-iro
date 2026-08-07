@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # whisper のモデルを models/ に取ってくる。
 #
-#   tools/fetch-model.sh          base（既定）
-#   tools/fetch-model.sh tiny     小さくて速い。ラズパイで base が重いとき
+#   tools/fetch-model.sh          tiny（既定・74MB）
+#   tools/fetch-model.sh base     大きいが精度が上がる（141MB）
 #
-# モデルは 141MB あるのでリポジトリには置かない（LFS の無駄）。
+# tiny で足りることは確認済み。語彙が12色に閉じていて initial_prompt で
+# 誘導し、さらに編集距離で吸収するので、大きいモデルを積む理由がない。
+#
+# モデルはリポジトリには置かない（LFS の無駄）。
 # 使うモデルは DONNA_IRO_MODEL で切り替える。
 #
 #   DONNA_IRO_MODEL=models/ggml-tiny.bin cargo run
 
 set -euo pipefail
 
-MODEL="${1:-base}"
+MODEL="${1:-tiny}"
 case "$MODEL" in
   tiny | base | small | medium | large-v3 | large-v3-turbo) ;;
   *)
@@ -49,8 +52,8 @@ fi
 mv "$FILE.part" "$FILE"
 echo "完了: $FILE ($(du -h "$FILE" | cut -f1))"
 
-if [ "$MODEL" != "base" ]; then
+if [ "$MODEL" != "tiny" ]; then
   echo
-  echo "既定は models/ggml-base.bin です。これを使うには:"
+  echo "既定は models/ggml-tiny.bin です。これを使うには:"
   echo "  DONNA_IRO_MODEL=$FILE cargo run"
 fi

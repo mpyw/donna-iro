@@ -24,7 +24,7 @@ intro
 git clone --recursive git@github.com:mpyw/donna-iro.git
 cd donna-iro
 git -C assets lfs pull      # 音源を取る
-tools/fetch-model.sh        # whisper のモデルを取る（141MB）
+tools/fetch-model.sh        # whisper のモデルを取る（tiny・74MB）
 cargo build --release
 ```
 
@@ -41,7 +41,7 @@ DONNA_IRO_ASSETS=assets/reference ./target/release/donna-iro
 | `--terminal` | ウィンドウを使わず色名だけ出す |
 | `--keyboard` | マイクの代わりに手打ち |
 | `DONNA_IRO_ASSETS=<dir>` | 音源のディレクトリ |
-| `DONNA_IRO_MODEL=<file>` | whisper のモデル（既定 `models/ggml-base.bin`） |
+| `DONNA_IRO_MODEL=<file>` | whisper のモデル（既定 `models/ggml-tiny.bin`） |
 
 ### ビルドの切り替え
 
@@ -141,4 +141,9 @@ macOS ではウィンドウをメインスレッドに置く必要があり、`c
 private であれば公衆送信にあたらないため問題ない。本体を public にする場合も
 こちらは private に留める（`.gitmodules` に URL は載るが中身は保護される）。
 
-whisper のモデルは 141MB あるのでリポジトリには置かない。`tools/fetch-model.sh` で取る。
+whisper のモデルはリポジトリには置かない。`tools/fetch-model.sh` で取る。
+
+**tiny で足りる。** 語彙が12色に閉じていて `initial_prompt` で誘導し、さらに
+編集距離で吸収するので、大きいモデルを積む理由がない。Raspberry Pi 5 で
+0.5秒前後を狙える。精度が足りなくなったら `tools/fetch-model.sh base` で
+差し替えられる。
