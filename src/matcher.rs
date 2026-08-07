@@ -1,12 +1,21 @@
 //! 認識結果の文字列から応答を判定する。
 //!
-//! 1. 完全一致 — 区間ごとに、先頭から
-//! 2. 部分一致 — 同上（長い読みから順に）
-//! 3. 音の近さで重み付けした編集距離 — **繋げた全体**で
+//! **信用できるのは先頭だけ。** tiny は短い音を渡されるとデコーダが
+//! 暴走して、言っていない語を後ろに継ぎ足すことがある。しかも同じ語の
+//! 繰り返しとは限らず、別の色が混ざる。だから後ろは捨てる。
 //!
-//! 1・2段目を区間ごとに見るのは、語彙をそのまま並べて返されたときに
-//! 最初に言った色を優先するため。3段目を全体で見るのは、認識が語を
-//! 割ることがあり、断片だけで判断すると誤るため。
+//! **位置が最優先。** 先頭の区間から順に、それぞれで次を試す。
+//!
+//! 1. 完全一致
+//! 2. 部分一致（長い読みから順に）
+//! 3. 音の近さで重み付けした編集距離
+//!
+//! 段の優先度を位置より上に置くと、後ろの区間が完全一致しただけで
+//! 先頭を追い越してしまう。「みじろ、きいろ」で実際にそうなった。
+//! 先頭は3段目でしか当たらないが、それでも先頭を採るべき。
+//!
+//! 当たらなければ次の区間と繋げて同じことを試す。認識が語を割ることが
+//! あるため（「ちゃいろ」が「じゃあ、いろ」になった）。
 //!
 //! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
@@ -26,6 +35,13 @@ pub const ALL_READING: &str = "ぜんぶ";
 /// 同じものの漢字表記。`initial_prompt` は誘導であって強制ではないので、
 /// whisper は漢字を返すことがある。実際に「全部」が出た。
 const ALL_KANJI: &str = "全部";
+
+/// 先頭から信用する区間の数。
+///
+/// tiny は言っていない語を後ろに継ぎ足すので、全部を見ると
+/// 混ざったものを拾ってしまう。かといって1区間に絞ると、
+/// 「えーと、あか」のような言い淀みや、語が割れた場合を落とす。
+const HEAD: usize = 2;
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -105,25 +121,25 @@ impl Matcher {
     }
 
     pub fn find(&self, raw: &str) -> Option<Answer> {
-        let parts: Vec<String> = segments(&normalize(raw))
+        let mut parts: Vec<String> = segments(&normalize(raw))
             .into_iter()
             .map(|seg| strip_prompt(&seg))
             .filter(|seg| !seg.is_empty())
             .collect();
+        // 同じ語の繰り返しは畳む。tiny が出力を繰り返すことがある。
+        parts.dedup();
+        parts.truncate(HEAD);
 
-        // 1・2段目は区間ごとに、先頭から順に。
-        // 語彙をそのまま並べて返されたとき、最初に言った色を優先するため。
-        for seg in &parts {
-            if let Some(a) = self.exact(seg).or_else(|| self.substring(seg)) {
-                return Some(a);
-            }
-        }
+        // 先頭の区間から順に。単独で当たらなければ次と繋げて試す。
+        (0..parts.len()).find_map(|i| {
+            (1..=2.min(parts.len() - i)).find_map(|take| self.judge(&parts[i..i + take].concat()))
+        })
+    }
 
-        // 3段目は繋げた全体で測る。認識が語を割ることがあり、
-        // 区間ごとに見ると断片だけで判断してしまう。
-        // 「ちゃいろ」が「じゃあ、いろ」になったとき、後半の「いろ」だけ
-        // 見ると「しろ」が最も近くなる。全体で見れば「ちゃいろ」が勝つ。
-        self.nearest(&parts.concat())
+    fn judge(&self, text: &str) -> Option<Answer> {
+        self.exact(text)
+            .or_else(|| self.substring(text))
+            .or_else(|| self.nearest(text))
     }
 
     fn exact(&self, text: &str) -> Option<Answer> {
@@ -277,6 +293,9 @@ const NEAR_CONSONANTS: &[&[u8]] = &[
     b"rd",   // ら行・だ行（幼児で入れ替わる）
 ];
 
+/// 母音だけの音（あいうえお）を表す印。
+const NO_CONSONANT: u8 = b'-';
+
 fn consonant_cost(a: u8, b: u8) -> usize {
     if a == b {
         0
@@ -285,8 +304,25 @@ fn consonant_cost(a: u8, b: u8) -> usize {
         .any(|g| g.contains(&a) && g.contains(&b))
     {
         1
+    } else if a == NO_CONSONANT || b == NO_CONSONANT {
+        // 子音が丸ごと消える／生えるのは、別の子音に変わるより大きい変化。
+        // ここを同じ扱いにすると「みじろ」が「みずいろ」ではなく
+        // 「きいろ」に寄ってしまう（じ→い を安く見積もるため）。
+        3
     } else {
         2
+    }
+}
+
+/// 挿入・削除の重み。
+///
+/// 母音だけの音は落ちたり伸びたりしやすいので安くする。
+/// 「みずいろ」が「みじろ」と認識されたように、幼児の発音でも
+/// 認識結果でも、母音1つの脱落は頻繁に起きる。
+fn indel(c: char) -> usize {
+    match decompose(c) {
+        Some((NO_CONSONANT, _)) => 2,
+        _ => INDEL,
     }
 }
 
@@ -298,6 +334,7 @@ fn consonant_cost(a: u8, b: u8) -> usize {
 ///   じ→ぜ  子音 z=z(0)      母音 i≠e(2)  → 2
 ///   じ→ち  子音 z≈t(1)      母音 i=i(0)  → 1
 ///   じ→き  子音 z≠k(2)      母音 i=i(0)  → 2
+///   じ→い  子音 z→無し(3)   母音 i=i(0)  → 3
 ///   ば→く  子音 b≠k(2)      母音 a≠u(2)  → 4
 fn substitution(a: char, b: char) -> usize {
     if a == b {
@@ -316,13 +353,19 @@ const INDEL: usize = 4;
 
 /// 音の近さで重み付けした編集距離。日本語なので文字単位で測る。
 fn levenshtein(a: &[char], b: &[char]) -> usize {
-    let mut prev: Vec<usize> = (0..=b.len()).map(|i| i * INDEL).collect();
+    let mut prev: Vec<usize> = std::iter::once(0)
+        .chain(b.iter().scan(0, |acc, &c| {
+            *acc += indel(c);
+            Some(*acc)
+        }))
+        .collect();
     let mut cur: Vec<usize> = vec![0; b.len() + 1];
     for (i, ca) in a.iter().enumerate() {
-        cur[0] = (i + 1) * INDEL;
+        cur[0] = prev[0] + indel(*ca);
+        let _ = i;
         for (j, cb) in b.iter().enumerate() {
-            cur[j + 1] = (prev[j + 1] + INDEL)
-                .min(cur[j] + INDEL)
+            cur[j + 1] = (prev[j + 1] + indel(*ca))
+                .min(cur[j] + indel(*cb))
                 .min(prev[j] + substitution(*ca, *cb));
         }
         std::mem::swap(&mut prev, &mut cur);
@@ -434,6 +477,24 @@ mod tests {
     }
 
     #[test]
+    fn dropped_vowel_is_cheap() {
+        // 「みずいろ」が「みじろ」と認識された実例。母音の脱落を
+        // 高く見積もると「きいろ」に負ける。
+        assert_eq!(find("みじろ"), c(Color::LightBlue));
+        assert_eq!(find("みじろ、みじろ。"), c(Color::LightBlue));
+    }
+
+    #[test]
+    fn hallucinated_tail_is_ignored() {
+        // tiny は言っていない語を後ろに継ぎ足す。先頭を優先する。
+        assert_eq!(find("あお、おれんじ、あか"), c(Color::Blue));
+        assert_eq!(find("あか、あお、みどり、しろ、くろ"), c(Color::Red));
+        // 先頭が3段目でしか当たらなくても、後ろの完全一致に譲らない。
+        assert_eq!(find("みじろ、みじろ、きいろ、しろ"), c(Color::LightBlue));
+        assert_eq!(find("みじろ、きいろ"), c(Color::LightBlue));
+    }
+
+    #[test]
     fn earlier_segment_wins() {
         assert_eq!(find("あか。あお"), c(Color::Red));
         assert_eq!(find("むらさき / みどり"), c(Color::Purple));
@@ -461,6 +522,8 @@ mod tests {
         // 近い子音は安い
         assert_eq!(d("じ", "ち"), 1);
         assert_eq!(d("ぱ", "ば"), 1);
+        // 子音が丸ごと消えるのは、別の子音に変わるより大きい
+        assert!(d("じ", "い") > d("じ", "き"));
         // 子音も母音も違えば満額
         assert_eq!(d("ば", "く"), 4);
         // 「じんば」は「ぴんく」より「ぜんぶ」に近い
