@@ -1,0 +1,16 @@
+[package]
+name = "donna-iro"
+version = "0.1.0"
+edition = "2021"
+
+# NOTE: バージョンは未検証。Raspberry Pi 側で `cargo add` して確定させること。
+[dependencies]
+anyhow = "1"
+rand = "0.8"
+
+# 音声認識: whisper.cpp の Rust バインディング
+whisper-rs = "0.16"
+
+# 録音 / 再生
+cpal = "0.15"
+rodio = "0.19"

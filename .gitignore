@@ -10,20 +10,16 @@ samples/
 *.m4a
 *.flac
 
-# 学習済みモデル
+# whisper のモデルファイル
 *.tflite
 *.onnx
-*.pt
+*.gguf
 *.bin
 models/
 
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.python-version
-*.egg-info/
+# Rust
+/target/
+**/*.rs.bk
 
 # macOS
 .DS_Store

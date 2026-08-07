@@ -48,6 +48,22 @@ tiny/base の日本語モデルで文字起こし → 色名リストにあい�
 エコーキャンセルには手を出さず、**質問終了直後の数秒だけ聞く**
 ウィンドウ制御で回避する。call-and-response の構造にも合っている。
 
+## 技術スタック
+
+Rust。
+
+| 用途 | クレート |
+| --- | --- |
+| 音声認識 | [`whisper-rs`](https://crates.io/crates/whisper-rs) — whisper.cpp の Rust バインディング |
+| 録音 | [`cpal`](https://crates.io/crates/cpal) |
+| 再生 | [`rodio`](https://crates.io/crates/rodio) |
+
+`Cargo.toml` のバージョンは未検証。Raspberry Pi 側で `cargo add` して確定させる。
+
+VAD やリアルタイムストリーミングが必要になったら
+[`whisper-cpp-plus`](https://crates.io/crates/whisper-cpp-plus) も候補。
+ただしウィンドウ制御で足りるなら不要。
+
 ## ハードウェア
 
 - Raspberry Pi 5
