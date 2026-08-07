@@ -17,7 +17,7 @@
 //!
 //! 要点は**無反応にしないこと**。判定できなくても必ず何かを鳴らす。
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -33,6 +33,9 @@ const LISTEN_MAX: Duration = Duration::from_secs(5);
 
 /// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
 const INSERT_EVERY: u32 = 3;
+
+/// フィナーレで色を差し替える間隔。
+const FLASH: Duration = Duration::from_millis(500);
 
 pub struct Game {
     player: Player,
@@ -72,9 +75,7 @@ impl Game {
             let answer = heard.as_deref().and_then(|t| self.matcher.find(t));
 
             if answer == Some(Answer::All) {
-                self.screen.show(Frame::Palette);
-                self.player.play(Cue::Finale)?;
-                return Ok(());
+                return self.finale();
             }
 
             // 聞き取れなければランダムな色。黙ってはいけない。
@@ -109,5 +110,22 @@ impl Game {
                 })?;
             }
         }
+    }
+
+    /// 転調 → ぜんぶの節 → エンディング。
+    ///
+    /// 鳴らし終わるのを待つのではなく、全長を受け取って鳴っている間に
+    /// 色を差し替える。「ぜんぶ」と答えたのだから、ぜんぶの色が
+    /// 次々に出るほうが締めくくりらしい。
+    fn finale(&mut self) -> Result<()> {
+        let timing = self.player.begin(Cue::Finale)?;
+        let end = Instant::now() + timing.total;
+        while Instant::now() < end {
+            self.screen.show(Frame::Single(Color::random()));
+            let left = end.saturating_duration_since(Instant::now());
+            std::thread::sleep(FLASH.min(left));
+        }
+        self.screen.show(Frame::Palette);
+        Ok(())
     }
 }

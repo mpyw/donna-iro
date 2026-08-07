@@ -17,7 +17,22 @@ pub enum Answer {
 }
 
 /// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
-const ALL_READINGS: &[&str] = &["ぜんぶ", "全部", "ぜーんぶ", "ぜんぶー"];
+///
+/// 実際に子どもの声を通したところ「じゃんぶー」「ジャンプ」に化けた。
+/// 幼児の「ぜ」は摩擦が弱くて「じゃ」に寄りやすいので、その系統を拾う。
+const ALL_READINGS: &[&str] = &[
+    "ぜんぶ",
+    "全部",
+    "ぜーんぶ",
+    "ぜんぶー",
+    "ぜんぷ",
+    "じゃんぶ",
+    "じゃんぶー",
+    "じゃんぷ",
+    "じゃんぷー",
+    "じぇんぶ",
+    "でんぶ",
+];
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -85,12 +100,12 @@ impl Matcher {
 
         // 3. 編集距離。
         //
-        //    「ぜんぶ」はここでは判定しない。誤検出するとゲームが終わって
-        //    しまうため、あいまい一致まで許すのは危険が大きい。取りこぼしても
-        //    次の周回でまた聞けるので、そちらの害は小さい。
+        //    当初は「ぜんぶ」を除外していた。誤検出するとゲームが終わって
+        //    しまうためだが、実際に試すと取りこぼしのほうが問題だった。
+        //    「ぜんぶ」と紛らわしい色名は無いので、含めても事故は起きにくい。
         let chars: Vec<char> = text.chars().collect();
         let mut scores: Vec<(Answer, usize)> = Vec::new();
-        for (a, r) in self.candidates.iter().filter(|(a, _)| *a != Answer::All) {
+        for (a, r) in self.candidates.iter() {
             let rc: Vec<char> = r.chars().collect();
             let d = levenshtein(&chars, &rc);
             if d > allowed(rc.len()) {
@@ -237,9 +252,13 @@ mod tests {
     }
 
     #[test]
-    fn all_is_not_matched_fuzzily() {
-        // 誤検出するとゲームが終わってしまうので、あいまい一致では拾わない。
-        assert_eq!(find("ぜんぷ"), None);
+    fn all_absorbs_toddler_pronunciation() {
+        // 実際に化けた形。幼児の「ぜ」は「じゃ」に寄る。
+        assert_eq!(find("じゃんぶー"), Some(Answer::All));
+        assert_eq!(find("ジャンプ"), Some(Answer::All));
+        assert_eq!(find("ぜんぷ"), Some(Answer::All));
+        // 編集距離でも拾う
+        assert_eq!(find("ぜんむ"), Some(Answer::All));
     }
 
     #[test]

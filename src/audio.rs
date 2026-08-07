@@ -40,7 +40,8 @@ impl Player {
 
     /// 鳴らし終わるまで待つ。
     pub fn play(&self, cue: Cue) -> Result<()> {
-        self.start(cue, false)
+        std::thread::sleep(self.begin(cue)?.total);
+        Ok(())
     }
 
     /// **音が鳴り止んだ時点で返す。** 末尾の無音は裏で流したままにする。
@@ -52,19 +53,33 @@ impl Player {
     /// 無音の長さは素材から測る。決め打ちにすると、つくよみちゃんの音源に
     /// 差し替えたときに合わなくなる。
     pub fn play_until_quiet(&self, cue: Cue) -> Result<()> {
-        self.start(cue, true)
-    }
-
-    fn start(&self, cue: Cue, early: bool) -> Result<()> {
-        let clip = Clip::load(cue)?;
-        let wait = if early { clip.audible() } else { clip.total() };
-        let sink = rodio::Sink::try_new(&self.handle)?;
-        sink.append(clip.into_source());
-        std::thread::sleep(wait);
-        // 残り（末尾の無音）は裏で流し切らせる。
-        sink.detach();
+        std::thread::sleep(self.begin(cue)?.audible);
         Ok(())
     }
+
+    /// **鳴らし始めて長さだけ返す。待たない。**
+    ///
+    /// 鳴っている間に画面を動かしたいときに使う。
+    pub fn begin(&self, cue: Cue) -> Result<Timing> {
+        let clip = Clip::load(cue)?;
+        let timing = Timing {
+            total: clip.total(),
+            audible: clip.audible(),
+        };
+        let sink = rodio::Sink::try_new(&self.handle)?;
+        sink.append(clip.into_source());
+        // 呼び出し側が待つので、こちらは裏で流し切らせる。
+        sink.detach();
+        Ok(timing)
+    }
+}
+
+/// 素材の長さ。
+pub struct Timing {
+    /// 末尾の無音まで含めた全長。
+    pub total: Duration,
+    /// 音が鳴り止むまで。
+    pub audible: Duration,
 }
 
 /// 復号済みの音。長さと末尾の無音を測るために一度メモリに載せる。
