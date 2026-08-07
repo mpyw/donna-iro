@@ -98,12 +98,15 @@ def render(path):
         total_div = max(total_div, span)
         plans.append((events, params))
 
-    n = int((total_div * SEC_PER_DIV + 1.0) * SR)
+    # 小節長ちょうどで切る。余韻を足すと素材を繋いだときに
+    # そこが無音の隙間になり、曲として繋がらなくなる。
+    # 節の末尾はもともと休符で終わっているので、切っても不自然にならない。
+    n = int(round(total_div * SEC_PER_DIV * SR))
     buf = np.zeros(n)
     for events, params in plans:
         for start, dur, p in events:
             s = int(start * SEC_PER_DIV * SR)
-            # 音価より少し長く鳴らして自然な減衰にする
+            # 音価より少し長く鳴らして自然な減衰にする（末尾ははみ出た分を切る）
             length = dur * SEC_PER_DIV * 1.3
             sig = tone(freq(p), length, **params)
             end = min(n, s + len(sig))
@@ -112,6 +115,18 @@ def render(path):
     peak = np.abs(buf).max()
     if peak > 0:
         buf = buf / peak * 0.89
+
+    # 先頭の無音を落とす。原曲 m1 は両パートとも3拍が空で、
+    # そのまま出すと再生開始時に間の抜けた沈黙になる。
+    nz = np.nonzero(np.abs(buf) > 1e-4)[0]
+    if len(nz):
+        buf = buf[nz[0]:]
+        n = len(buf)
+
+    # 末尾で減衰が残っていた場合のプチッというノイズだけ潰す。
+    # 15ms なら繋ぎ目として知覚されない。
+    fade = min(n, int(0.015 * SR))
+    buf[-fade:] *= np.linspace(1, 0, fade)
     pcm = (buf * 32767).astype("<i2")
 
     os.makedirs(OUT, exist_ok=True)

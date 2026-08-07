@@ -237,14 +237,47 @@ ORIGINAL = {
 # 「ちゃ」「みー」は1音に乗せるので1要素として扱う。
 NEW = {
     "yellowgreen": (list("きみどりいろがすき"), list("きみどりのクレヨン")),
-    "white": (list("しろいいろがすき"), list("しろいクレヨン")),
+    "white": (list("しーろいいろがすき"), list("しろいクレヨン")),
     "black": (list("くろいいろがすき"), list("くろいクレヨン")),
     "pink": (list("ピンクいろがすき"), list("ピンクのクレヨン")),
     "orange": (list("オレンジいろがすき"), list("オレンジのクレヨン")),
     "purple": (list("むらさきいろがすき"), list("むらさきのクレヨン")),
     "brown": (["ちゃ"] + list("いろいいろがすき"), ["ちゃ"] + list("いろいクレヨン")),
-    "lightblue": (["みー"] + list("ずいろがすき"), list("みずいろのクレヨン")),
+    "lightblue": (list("みーずいろがすき"), list("みずいろのクレヨン")),
 }
+
+# 1行目の音価を明示的に上書きする色（divisions 単位、合計 48）。
+#
+# 「しーろ」「みーず」は頭の母音を伸ばす。UTAU では「ー」を
+# 独立した音符に置くと直前の母音を継続するので、そう表現する。
+# 「し」と「ー」で 9+9 = 18（1.5拍）を使い、はっきり伸ばす。
+HOLD_L1 = {
+    #        し  ー  ろ  い  い  ろ  が  す
+    "white": [9, 9, 6, 6, 3, 6, 6, 3],
+    #             み  ー  ず  い  ろ  が  す
+    "lightblue": [9, 9, 6, 6, 6, 9, 3],
+}
+
+# 「ー」を置く音符の位置（1行目の何音目か、0始まり）。
+# 直前の音と同じ高さにしないと母音の継続にならない。
+HOLD_AT = {"white": 1, "lightblue": 1}
+
+
+def apply_durations(measure, durs):
+    notes = pitched(measure)
+    assert len(notes) == len(durs), f"{len(notes)} notes vs {len(durs)} durations"
+    assert sum(durs) == 48, f"合計 {sum(durs)} != 48"
+    for n, d in zip(notes, durs):
+        set_duration(n, d)
+
+
+def unify_pitch(measure, i):
+    """i 番目の音を直前の音と同じ高さに揃える（母音を伸ばすため）。"""
+    notes = pitched(measure)
+    prev = notes[i - 1].find("pitch")
+    cur = notes[i]
+    cur.remove(cur.find("pitch"))
+    cur.insert(0, copy.deepcopy(prev))
 
 
 def main():
@@ -271,9 +304,14 @@ def main():
     emit("interlude", rng(27, 31), 1,
          lambda pid, num, m: mute_before(m, 2.0) if pid == "P1" and num == "27" else None)
 
-    # ぜんぶ＋エンディング。m49 を転調のつなぎとして頭に置き、旋律は消す。
-    emit("all", rng(49, 58), 3,
-         lambda pid, num, m: mute_melody(m, 0.0) if pid == "P1" and num == "49" else None)
+    # ぜんぶ＋エンディング。
+    #
+    # 転調のつなぎとして m49 を頭に置いていたが、m49 のピアノは
+    # 1拍目が休符で、しかも m50 と完全に同一のヴァンプだった。
+    # 無音の1拍と冗長な1小節が増えるだけなので落とす。
+    # イ長調の節がいきなり頭から鳴るほうが、半音上がりが決まる。
+    # 末尾の m58 は両パートとも完全に空の小節なので落とす。
+    emit("all", rng(50, 57), 3)
 
     # --- 原曲にある4色 ---
     for name, spans in ORIGINAL.items():
@@ -287,7 +325,11 @@ def main():
     # --- 原曲にない8色（あかの節を型として編曲） ---
     for name, (l1, l3) in NEW.items():
         out = build(root, measures, name, ORIGINAL["red"], 1)
-        refit_verse(out.find("part[@id='P1']").findall("measure"), l1, l3)
+        mm = out.find("part[@id='P1']").findall("measure")
+        refit_verse(mm, l1, l3)
+        if name in HOLD_L1:
+            apply_durations(mm[0], HOLD_L1[name])
+            unify_pitch(mm[0], HOLD_AT[name])
         made.append((name, 6, write(out, name)))
 
     for name, n, path in made:
