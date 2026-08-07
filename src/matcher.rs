@@ -1,13 +1,14 @@
 //! 認識結果の文字列から応答を判定する。
 //!
-//! まずひらがな以外で区切り、**先頭の区間から順に**判定する。
-//! 各区間では次を順に試す。
+//! 1. 完全一致 — 区間ごとに、先頭から
+//! 2. 部分一致 — 同上（長い読みから順に）
+//! 3. 音の近さで重み付けした編集距離 — **繋げた全体**で
 //!
-//! 1. 完全一致
-//! 2. 部分一致（長い読みから順に）
-//! 3. 編集距離が最小のもの
+//! 1・2段目を区間ごとに見るのは、語彙をそのまま並べて返されたときに
+//! 最初に言った色を優先するため。3段目を全体で見るのは、認識が語を
+//! 割ることがあり、断片だけで判断すると誤るため。
 //!
-//! どの区間も該当しなければ `None`。呼び出し側でランダムな色に倒す。
+//! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
 use crate::color::Color;
 
@@ -34,17 +35,17 @@ const PROMPT: &[&str] = &["どんないろがすき", "どんないろ", "どん
 
 /// 許容する編集距離。短い読みほど厳しくする。
 ///
-/// 単位は `substitution` の重みなので、2 が「1音ぶんのずれ」にあたる。
+/// 単位は `substitution` の重みなので、4 が「1音ぶんのずれ」にあたる。
 /// 2文字の読みは1音、3文字以上は1音半まで許す。
 ///
 /// **「ぜんぶ」だけは1音までに絞る。** 誤検出するとゲームが終わって
-/// しまうため。3文字ぶん許すと「でんわ」あたりが引っかかる。
+/// しまうため。緩めると「でんわ」あたりが引っかかる。
 /// 逆に取りこぼしても次の周回でまた聞けるので、そちらの害は小さい。
 fn allowed(answer: Answer, reading_len: usize) -> usize {
     match answer {
-        Answer::All => 2,
-        Answer::Color(_) if reading_len <= 2 => 2,
-        Answer::Color(_) => 3,
+        Answer::All => 4,
+        Answer::Color(_) if reading_len <= 2 => 4,
+        Answer::Color(_) => 6,
     }
 }
 
@@ -104,34 +105,46 @@ impl Matcher {
     }
 
     pub fn find(&self, raw: &str) -> Option<Answer> {
-        // 先頭の区間から順に見る。最初に言った色を優先するため。
-        segments(&normalize(raw))
+        let parts: Vec<String> = segments(&normalize(raw))
             .into_iter()
-            .filter_map(|seg| {
-                let text = strip_prompt(&seg);
-                (!text.is_empty()).then(|| self.find_one(&text))?
-            })
-            .next()
+            .map(|seg| strip_prompt(&seg))
+            .filter(|seg| !seg.is_empty())
+            .collect();
+
+        // 1・2段目は区間ごとに、先頭から順に。
+        // 語彙をそのまま並べて返されたとき、最初に言った色を優先するため。
+        for seg in &parts {
+            if let Some(a) = self.exact(seg).or_else(|| self.substring(seg)) {
+                return Some(a);
+            }
+        }
+
+        // 3段目は繋げた全体で測る。認識が語を割ることがあり、
+        // 区間ごとに見ると断片だけで判断してしまう。
+        // 「ちゃいろ」が「じゃあ、いろ」になったとき、後半の「いろ」だけ
+        // 見ると「しろ」が最も近くなる。全体で見れば「ちゃいろ」が勝つ。
+        self.nearest(&parts.concat())
     }
 
-    fn find_one(&self, text: &str) -> Option<Answer> {
-        // 1. 完全一致
-        if let Some((a, _)) = self.candidates.iter().find(|(_, r)| r == text) {
-            return Some(*a);
-        }
+    fn exact(&self, text: &str) -> Option<Answer> {
+        self.candidates
+            .iter()
+            .find(|(_, r)| r == text)
+            .map(|(a, _)| *a)
+    }
 
-        // 2. 部分一致
-        if let Some((a, _)) = self
-            .candidates
+    fn substring(&self, text: &str) -> Option<Answer> {
+        self.candidates
             .iter()
             .find(|(_, r)| text.contains(r.as_str()))
-        {
-            return Some(*a);
-        }
+            .map(|(a, _)| *a)
+    }
 
-        // 3. 編集距離。読みは色ごとに1つなので、ゆれはここで吸収する。
-        //    拗音と長音を落とした骨格で比べる。
+    fn nearest(&self, text: &str) -> Option<Answer> {
         let chars = skeleton(text);
+        if chars.is_empty() {
+            return None;
+        }
         let mut scores: Vec<(Answer, usize)> = Vec::new();
         for (a, r) in self.skeletons.iter() {
             let d = levenshtein(&chars, r);
@@ -251,30 +264,55 @@ fn decompose(c: char) -> Option<(u8, usize)> {
     })
 }
 
-/// 置換の重み。
+/// 混同しやすい子音の組。幼児の発音でも音声認識でも入れ替わる。
 ///
-/// 素の編集距離だと、文字が違えば一律1になる。それだと
-/// 「じ→ぜ」（同じザ行）と「ば→く」（無関係）が同じ扱いになり、
-/// 「じんば」が「ぜんぶ」と「ぴんく」の両方から等距離になってしまう。
+/// `sztd` をひとまとめにしているのは、い段で「し・じ・ち・ぢ」が
+/// 硬口蓋の摩擦音／破擦音に寄って区別が付かなくなるため。
+/// 実際に「ちゃいろ」が「じゃあ、いろ」と認識された。
+const NEAR_CONSONANTS: &[&[u8]] = &[
+    b"kg",   // か行・が行（清濁）
+    b"sztd", // さ・ざ・た・だ行（清濁と、し/じ/ち/ぢ の混同）
+    b"hbp",  // は・ば・ぱ行
+    b"mn",   // 鼻音
+    b"rd",   // ら行・だ行（幼児で入れ替わる）
+];
+
+fn consonant_cost(a: u8, b: u8) -> usize {
+    if a == b {
+        0
+    } else if NEAR_CONSONANTS
+        .iter()
+        .any(|g| g.contains(&a) && g.contains(&b))
+    {
+        1
+    } else {
+        2
+    }
+}
+
+/// 置換の重み。1音ぶんのずれが 4 になる目盛り。
 ///
-/// 子音と母音を別々に数えると、音として近いほど安くなる。
-///   じ→ぜ  子音 z=z、母音 i≠e        → 1
-///   ば→ぶ  子音 b=b、母音 a≠u        → 1
-///   ば→く  子音 b≠k、母音 a≠u        → 2
+/// 素の編集距離だと文字が違えば一律1で、「じ→ぜ」（同じザ行）と
+/// 「ば→く」（無関係）が同じ扱いになる。子音と母音を別々に数え、
+/// さらに子音は音の近さで刻む。
+///   じ→ぜ  子音 z=z(0)      母音 i≠e(2)  → 2
+///   じ→ち  子音 z≈t(1)      母音 i=i(0)  → 1
+///   じ→き  子音 z≠k(2)      母音 i=i(0)  → 2
+///   ば→く  子音 b≠k(2)      母音 a≠u(2)  → 4
 fn substitution(a: char, b: char) -> usize {
     if a == b {
         return 0;
     }
     match (decompose(a), decompose(b)) {
-        (Some((ca, va)), Some((cb, vb))) => usize::from(ca != cb) + usize::from(va != vb),
+        (Some((ca, va)), Some((cb, vb))) => consonant_cost(ca, cb) + if va == vb { 0 } else { 2 },
         // 「ん」や表に無い文字。似ている度合いを測れないので別物とみなす。
-        _ => 2,
+        _ => 4,
     }
 }
 
 /// 挿入・削除の重み。置換の最大と揃えて、
 /// 「1音ぶんのずれ」がどの操作でも同じ値になるようにする。
-const INDEL: usize = 2;
+const INDEL: usize = 4;
 
 /// 音の近さで重み付けした編集距離。日本語なので文字単位で測る。
 fn levenshtein(a: &[char], b: &[char]) -> usize {
@@ -389,6 +427,13 @@ mod tests {
     }
 
     #[test]
+    fn split_word_is_rejoined() {
+        // 認識が「ちゃいろ」を「じゃあ、いろ」に割ったときの実例。
+        // 後半だけ見ると「しろ」が最も近い。全体で見れば茶色が勝つ。
+        assert_eq!(find("じゃあ、いろ。"), c(Color::Brown));
+    }
+
+    #[test]
     fn earlier_segment_wins() {
         assert_eq!(find("あか。あお"), c(Color::Red));
         assert_eq!(find("むらさき / みどり"), c(Color::Purple));
@@ -411,10 +456,13 @@ mod tests {
         };
         assert_eq!(d("あか", "あか"), 0);
         // 同じ行なら母音のずれだけ
-        assert_eq!(d("じ", "ぜ"), 1);
-        assert_eq!(d("ば", "ぶ"), 1);
-        // 子音も母音も違えば2
-        assert_eq!(d("ば", "く"), 2);
+        assert_eq!(d("じ", "ぜ"), 2);
+        assert_eq!(d("ば", "ぶ"), 2);
+        // 近い子音は安い
+        assert_eq!(d("じ", "ち"), 1);
+        assert_eq!(d("ぱ", "ば"), 1);
+        // 子音も母音も違えば満額
+        assert_eq!(d("ば", "く"), 4);
         // 「じんば」は「ぴんく」より「ぜんぶ」に近い
         assert!(d("じんば", "ぜんぶ") < d("じんば", "ぴんく"));
     }
