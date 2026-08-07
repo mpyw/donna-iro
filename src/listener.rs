@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::audio;
+use crate::audio::Ears;
 
 pub enum Listener {
-    Mic(Mic),
+    Mic(Mic, Ears),
     Keyboard,
 }
 
@@ -22,7 +22,7 @@ impl Listener {
     /// 応答を聞き取って文字列にする。何も言わなければ `None`。
     pub fn hear(&mut self, max: Duration) -> Result<Option<String>> {
         match self {
-            Listener::Mic(m) => match audio::listen(max)? {
+            Listener::Mic(m, ears) => match ears.listen(max)? {
                 Some(pcm) => Ok(m.transcribe(&pcm)),
                 None => Ok(None),
             },

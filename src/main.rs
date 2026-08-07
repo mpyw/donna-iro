@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use audio::Player;
+use audio::{Ears, Player};
 use display::Rgb;
 use listener::{Listener, Mic};
 
@@ -155,7 +155,7 @@ fn main() -> Result<()> {
 
     let player = Player::new()?;
     let mut ears = if cfg!(feature = "whisper") {
-        Listener::Mic(Mic::new()?)
+        Listener::Mic(Mic::new()?, Ears::new()?)
     } else {
         Listener::Keyboard
     };
