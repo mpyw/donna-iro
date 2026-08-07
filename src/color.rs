@@ -2,7 +2,7 @@
 //!
 //! 語彙をここに閉じることで、汎用 ASR に頼らずとも判定できるようにする。
 
-use crate::display::Rgb;
+use crate::screen::Rgb;
 
 /// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
 /// （しろ・きいろ・きみどり・みどり・みずいろ・あお・むらさき・
@@ -82,6 +82,24 @@ impl Color {
             Color::Purple => (146, 7, 131),
             Color::Brown => (122, 69, 26),
             Color::LightBlue => (0, 160, 233),
+        }
+    }
+
+    /// ターミナルに出す名前。動作確認用なので読めれば良い。
+    pub fn name(&self) -> &'static str {
+        match self {
+            Color::Red => "赤",
+            Color::Blue => "青",
+            Color::Yellow => "黄",
+            Color::Green => "緑",
+            Color::YellowGreen => "黄緑",
+            Color::White => "白",
+            Color::Black => "黒",
+            Color::Pink => "ピンク",
+            Color::Orange => "オレンジ",
+            Color::Purple => "紫",
+            Color::Brown => "茶",
+            Color::LightBlue => "水色",
         }
     }
 

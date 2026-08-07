@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["whisper"]
+default = ["whisper", "window"]
 # whisper.cpp のビルドに数分かかるので切り離してある。
 #   cargo run --no-default-features   → キーボード入力（再生の確認用、すぐ起動する）
 #   cargo run                         → マイク入力
@@ -12,6 +12,10 @@ whisper = ["dep:whisper-rs"]
 # 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動く。
 # include_bytes! はコンパイル時にファイルを要求するので、
 # assets/*.wav が揃うまでは有効にできない。
+# ウィンドウに丸を描く。テレビに映すのはこちらが本命。
+# 外すとターミナルに色名を出すだけになる。
+window = ["dep:minifb"]
+
 embed = []
 # --- 認識の加速。プラットフォームごとに使えるものが違う ---
 #
@@ -35,6 +39,7 @@ rand = "0.8"
 # Raspberry Pi では ALSA を使う。ソースは共通のままでよい。
 cpal = "0.15"
 rodio = "0.19"
+minifb = { version = "0.28", optional = true }
 
 # 音声認識: whisper.cpp の Rust バインディング
 whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }

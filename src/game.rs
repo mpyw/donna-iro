@@ -24,9 +24,9 @@ use anyhow::Result;
 use crate::audio::Player;
 use crate::color::Color;
 use crate::cue::Cue;
-use crate::display::Screen;
 use crate::listener::Listener;
 use crate::matcher::{Answer, Matcher};
+use crate::screen::{Frame, Screen};
 
 /// 応答を待つ最大時間。2歳児は考えてから言うので短すぎると取りこぼす。
 const LISTEN_MAX: Duration = Duration::from_secs(5);
@@ -36,23 +36,23 @@ const INSERT_EVERY: u32 = 3;
 
 pub struct Game {
     player: Player,
-    screen: Screen,
+    screen: Box<dyn Screen>,
     matcher: Matcher,
     ears: Box<dyn Listener>,
 }
 
 impl Game {
-    pub fn new(player: Player, ears: Box<dyn Listener>) -> Self {
+    pub fn new(player: Player, ears: Box<dyn Listener>, screen: Box<dyn Screen>) -> Self {
         Self {
             player,
-            screen: Screen::new(),
+            screen,
             matcher: Matcher::new(),
             ears,
         }
     }
 
     pub fn run(&mut self) -> Result<()> {
-        self.show_palette();
+        self.screen.show(Frame::Palette);
         self.player.play(Cue::Intro)?;
 
         // 「ぜんぶ！」と言うまで無限に続く。何度でも好きな色を
@@ -62,7 +62,7 @@ impl Game {
             round += 1;
 
             // まだ色が決まっていないので全色を出す。
-            self.show_palette();
+            self.screen.show(Frame::Palette);
 
             // 質問は**鳴り止んだ時点で返る**。末尾の合いの手枠は
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
@@ -72,7 +72,7 @@ impl Game {
             let answer = heard.as_deref().and_then(|t| self.matcher.find(t));
 
             if answer == Some(Answer::All) {
-                self.show_palette();
+                self.screen.show(Frame::Palette);
                 self.player.play(Cue::Finale)?;
                 return Ok(());
             }
@@ -83,7 +83,7 @@ impl Game {
                 Some(Answer::Color(c)) => c,
                 _ => Color::random(),
             };
-            self.screen.show(&crate::display::one(color.rgb()));
+            self.screen.show(Frame::Single(color));
             self.player.play(Cue::Color(color))?;
 
             // 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
@@ -101,7 +101,7 @@ impl Game {
             })?;
 
             if insert {
-                self.show_palette();
+                self.screen.show(Frame::Palette);
                 self.player.play(if interlude_next {
                     Cue::Interlude
                 } else {
@@ -109,10 +109,5 @@ impl Game {
                 })?;
             }
         }
-    }
-
-    fn show_palette(&mut self) {
-        let rgbs: Vec<_> = Color::ALL.iter().map(|c| c.rgb()).collect();
-        self.screen.show(&crate::display::all(&rgbs));
     }
 }
