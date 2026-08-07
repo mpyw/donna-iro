@@ -46,31 +46,32 @@ impl Color {
 
     /// 認識結果の文字列にマッチさせる読み。表記ゆれと幼児の発音ゆれを吸収する。
     ///
-    /// マッチは**必ず長い読みから順に**試すこと。短い色名が長い色名に
-    /// 含まれる組み合わせがあるため、素朴に前から探すと誤判定する。
+    /// **カタカナ表記は並べない。** 判定前に認識結果も読みも `normalize()` で
+    /// ひらがなに寄せるので、「ピンク」は「ぴんく」で拾える。漢字は
+    /// ひらがなに変換できないので読みとして残す。
     ///
-    /// - 「きみどり」⊃「みどり」
-    /// - 「みずいろ」「ちゃいろ」「きいろ」⊃「いろ」
+    /// 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）があるため、
+    /// 部分一致は長い読みから順に試すこと。`match_answer()` がそうしている。
     ///
     /// 「ももいろ」はピンク、「だいだい」はオレンジの読みとして扱う。
     /// クレヨンの表記と子どもが言う語が違うため、両方拾えるようにしてある。
     fn readings(&self) -> &'static [&'static str] {
         match self {
-            Color::Red => &["あか", "アカ", "赤"],
-            Color::Blue => &["あお", "アオ", "青"],
+            Color::Red => &["あか", "赤"],
+            Color::Blue => &["あお", "青"],
             // 「いーろ」は頭の「き」が落ちた発音。2歳児だと出にくい音なので拾う。
             // ただし裸の「いろ」は入れてはいけない。ほぼ全ての色名と
             // 歌詞そのものに含まれるので、何を言っても黄色になってしまう。
-            Color::Yellow => &["きいろ", "キイロ", "黄色", "きーろ", "きいく", "いーろ"],
-            Color::Green => &["みどり", "ミドリ", "緑", "みろり"],
-            Color::YellowGreen => &["きみどり", "キミドリ", "黄緑", "きみろり"],
-            Color::White => &["しろ", "シロ", "白"],
-            Color::Black => &["くろ", "クロ", "黒"],
-            Color::Pink => &["ぴんく", "ピンク", "ぴんこ", "ももいろ", "桃色"],
-            Color::Orange => &["おれんじ", "オレンジ", "おえんじ", "だいだい", "橙"],
-            Color::Purple => &["むらさき", "ムラサキ", "紫", "むあさき"],
-            Color::Brown => &["ちゃいろ", "チャイロ", "茶色"],
-            Color::LightBlue => &["みずいろ", "ミズイロ", "水色"],
+            Color::Yellow => &["きいろ", "黄色", "きーろ", "きいく", "いーろ"],
+            Color::Green => &["みどり", "緑", "みろり"],
+            Color::YellowGreen => &["きみどり", "黄緑", "きみろり"],
+            Color::White => &["しろ", "白"],
+            Color::Black => &["くろ", "黒"],
+            Color::Pink => &["ぴんく", "ぴんこ", "ももいろ", "桃色"],
+            Color::Orange => &["おれんじ", "おえんじ", "だいだい", "橙"],
+            Color::Purple => &["むらさき", "紫", "むあさき"],
+            Color::Brown => &["ちゃいろ", "茶色"],
+            Color::LightBlue => &["みずいろ", "水色"],
         }
     }
 
@@ -98,6 +99,7 @@ impl Color {
 }
 
 /// 子どもの応答。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Answer {
     /// 色を答えた。ループを続ける。
     Color(Color),
@@ -189,19 +191,142 @@ fn main() -> Result<()> {
 const INSERT_EVERY: u32 = 3;
 
 /// 音声から応答を判定する。確信が持てなければ None。
-///
-/// **`All` の判定は色より慎重に。** 誤検出するとゲームが終わってしまう。
-/// 逆に取りこぼしても次の周回でまた聞けるので、迷ったら色として扱うか
-/// None を返すほうが害が小さい。
-///
-/// TODO: まず whisper-rs で文字起こし → readings() にあいまい一致、で試す。
+fn recognize(audio: &[f32]) -> Option<Answer> {
+    match_answer(&transcribe(audio)?)
+}
+
+/// TODO: whisper-rs で文字起こしする。何も喋っていなければ None。
 ///       精度が出なければ、その子の声で学習した専用分類器に差し替える。
-fn recognize(_audio: &[f32]) -> Option<Answer> {
-    todo!("whisper-rs による認識")
+fn transcribe(_audio: &[f32]) -> Option<String> {
+    todo!("whisper-rs による文字起こし")
 }
 
 /// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
-const ALL_READINGS: &[&str] = &["ぜんぶ", "ゼンブ", "全部", "ぜーんぶ", "ぜんぶー"];
+const ALL_READINGS: &[&str] = &["ぜんぶ", "全部", "ぜーんぶ", "ぜんぶー"];
+
+/// 判定に使う候補をすべて列挙する。
+fn candidates() -> Vec<(Answer, &'static str)> {
+    let mut v = Vec::new();
+    for c in Color::ALL {
+        for &r in c.readings() {
+            v.push((Answer::Color(c), r));
+        }
+    }
+    for &r in ALL_READINGS {
+        v.push((Answer::All, r));
+    }
+    v
+}
+
+/// カタカナをひらがなに寄せ、空白と記号を落とす。
+///
+/// 認識結果と読みの両方を同じ関数に通すので、読みの側にカタカナ表記を
+/// 並べる必要がない。長音符「ー」はカタカナ領域の外なのでそのまま残る。
+fn normalize(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace() && !is_ignorable(*c))
+        .map(|c| {
+            let u = c as u32;
+            if (0x30A1..=0x30F6).contains(&u) {
+                char::from_u32(u - 0x60).unwrap_or(c)
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+fn is_ignorable(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。' | '，' | '．' | ',' | '.' | '!' | '?' | '！' | '？'
+            | '「' | '」' | '（' | '）' | '(' | ')' | '・' | '〜' | '~'
+    )
+}
+
+/// 編集距離。日本語なのでバイトではなく文字単位で測る。
+fn levenshtein(a: &[char], b: &[char]) -> usize {
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur: Vec<usize> = vec![0; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// 許容する編集距離。短い読みほど厳しくする。
+/// 「あか」と「あお」は1文字違いなので、緩めると取り違える。
+fn allowed(reading_len: usize) -> usize {
+    if reading_len <= 4 {
+        1
+    } else {
+        2
+    }
+}
+
+/// 認識結果の文字列から応答を判定する。
+///
+/// 1. 完全一致
+/// 2. 部分一致（長い読みから順に）
+/// 3. 編集距離が最小のもの
+/// 4. どれも該当しなければ `None`。呼び出し側でランダムな色に倒す
+fn match_answer(raw: &str) -> Option<Answer> {
+    let text = normalize(raw);
+    if text.is_empty() {
+        return None;
+    }
+    let mut cands: Vec<(Answer, String)> = candidates()
+        .into_iter()
+        .map(|(a, r)| (a, normalize(r)))
+        .collect();
+
+    // 1. 完全一致
+    if let Some((a, _)) = cands.iter().find(|(_, r)| *r == text) {
+        return Some(*a);
+    }
+
+    // 2. 部分一致。短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
+    //    あるので、長い読みから試さないと取りこぼす。
+    cands.sort_by_key(|(_, r)| std::cmp::Reverse(r.chars().count()));
+    if let Some((a, _)) = cands.iter().find(|(_, r)| text.contains(r.as_str())) {
+        return Some(*a);
+    }
+
+    // 3. 編集距離。
+    //
+    //    「ぜんぶ」はここでは判定しない。誤検出するとゲームが終わってしまう
+    //    ため、あいまい一致まで許すのは危険が大きい。取りこぼしても次の周回で
+    //    また聞けるので、そちらの害は小さい。
+    let chars: Vec<char> = text.chars().collect();
+    let mut scores: Vec<(Answer, usize)> = Vec::new();
+    for (a, r) in cands.iter().filter(|(a, _)| *a != Answer::All) {
+        let rc: Vec<char> = r.chars().collect();
+        let d = levenshtein(&chars, &rc);
+        if d > allowed(rc.len()) {
+            continue;
+        }
+        // 同じ色に複数の読みがあるので、その色での最小距離を持つ
+        if let Some(slot) = scores.iter_mut().find(|s| s.0 == *a) {
+            slot.1 = slot.1.min(d);
+        } else {
+            scores.push((*a, d));
+        }
+    }
+    scores.sort_by_key(|&(_, d)| d);
+
+    let (best, best_d) = *scores.first()?;
+    // 同点なら諦める。「あか」と「あお」、「しろ」と「くろ」のように
+    // 1文字違いの色があるので、割れたまま採用すると取り違える。
+    if scores.get(1).is_some_and(|&(_, d)| d == best_d) {
+        return None;
+    }
+    Some(best)
+}
 
 /// 判定できなかったときのフォールバック。
 fn pick_random() -> Color {
@@ -228,4 +353,83 @@ fn listen(_max: std::time::Duration) -> Result<Vec<f32>> {
 /// TODO: rodio で再生する。再生完了までブロックする。
 fn play(_path: &str) -> Result<()> {
     todo!("rodio による再生")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c(x: Color) -> Option<Answer> {
+        Some(Answer::Color(x))
+    }
+
+    #[test]
+    fn exact_match() {
+        assert_eq!(match_answer("あか"), c(Color::Red));
+        assert_eq!(match_answer("みずいろ"), c(Color::LightBlue));
+        assert_eq!(match_answer("ぜんぶ"), Some(Answer::All));
+    }
+
+    #[test]
+    fn katakana_is_normalized_to_hiragana() {
+        assert_eq!(match_answer("アカ"), c(Color::Red));
+        assert_eq!(match_answer("ピンク"), c(Color::Pink));
+        assert_eq!(match_answer("オレンジ"), c(Color::Orange));
+    }
+
+    #[test]
+    fn kanji_readings() {
+        assert_eq!(match_answer("黄色"), c(Color::Yellow));
+        assert_eq!(match_answer("黄緑"), c(Color::YellowGreen));
+    }
+
+    #[test]
+    fn punctuation_and_space_are_stripped() {
+        assert_eq!(match_answer(" あか！ "), c(Color::Red));
+        assert_eq!(match_answer("あお。"), c(Color::Blue));
+    }
+
+    #[test]
+    fn substring_prefers_the_longest_reading() {
+        // 「きみどり」は「みどり」を含む。短いほうから見ると取りこぼす。
+        assert_eq!(match_answer("きみどりがすき"), c(Color::YellowGreen));
+        assert_eq!(match_answer("みどりだよ"), c(Color::Green));
+    }
+
+    #[test]
+    fn fuzzy_match_absorbs_mispronunciation() {
+        assert_eq!(match_answer("むらさぎ"), c(Color::Purple));
+        assert_eq!(match_answer("みずいる"), c(Color::LightBlue));
+    }
+
+    #[test]
+    fn ambiguous_one_char_difference_is_rejected() {
+        // 「あか」からも「あお」からも距離1。割れたまま採用すると取り違える。
+        assert_eq!(match_answer("あき"), None);
+    }
+
+    #[test]
+    fn all_is_not_matched_fuzzily() {
+        // 誤検出するとゲームが終わってしまうので、あいまい一致では拾わない。
+        assert_eq!(match_answer("ぜんぷ"), None);
+    }
+
+    #[test]
+    fn empty_input() {
+        assert_eq!(match_answer(""), None);
+        assert_eq!(match_answer("   "), None);
+    }
+
+    #[test]
+    fn unrelated_speech_is_rejected() {
+        assert_eq!(match_answer("おかあさん"), None);
+    }
+
+    #[test]
+    fn levenshtein_basics() {
+        let a: Vec<char> = "あか".chars().collect();
+        let b: Vec<char> = "あお".chars().collect();
+        assert_eq!(levenshtein(&a, &a), 0);
+        assert_eq!(levenshtein(&a, &b), 1);
+    }
 }
