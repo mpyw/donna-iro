@@ -192,8 +192,24 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
         };
     }
     const FILES: &[(&str, &[u8])] = table![
-        "intro", "question", "tail", "tail-lead", "bridge", "interlude", "all", "red", "blue",
-        "yellow", "green", "yellowgreen", "white", "black", "pink", "orange", "purple", "brown",
+        "intro",
+        "question",
+        "tail",
+        "tail-lead",
+        "bridge",
+        "interlude",
+        "all",
+        "red",
+        "blue",
+        "yellow",
+        "green",
+        "yellowgreen",
+        "white",
+        "black",
+        "pink",
+        "orange",
+        "purple",
+        "brown",
         "lightblue",
     ];
     FILES.iter().find(|(n, _)| *n == stem).map(|(_, b)| *b)

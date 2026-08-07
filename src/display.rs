@@ -29,7 +29,13 @@ fn border(c: Rgb) -> Rgb {
 }
 
 fn pixel(c: Rgb) -> String {
-    format!("\x1b[48;2;{};{};{}m{}{RESET}", c.0, c.1, c.2, " ".repeat(PX))
+    format!(
+        "\x1b[48;2;{};{};{}m{}{RESET}",
+        c.0,
+        c.1,
+        c.2,
+        " ".repeat(PX)
+    )
 }
 
 /// 色を横に並べた四角として描く。`size` はピクセル単位の一辺。

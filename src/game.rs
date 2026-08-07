@@ -89,8 +89,8 @@ impl Game {
             // 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
             // 挟むものはブリッジと間奏を交互に入れ替える。同じ区切りが
             // 毎回続くとそれ自体が単調になるため。
-            let insert = round % INSERT_EVERY == 0;
-            let interlude_next = insert && (round / INSERT_EVERY) % 2 == 0;
+            let insert = round.is_multiple_of(INSERT_EVERY);
+            let interlude_next = insert && (round / INSERT_EVERY).is_multiple_of(2);
 
             // 節の最終小節。間奏を launch する助走はアウフタクトで
             // この小節に属するので、間奏へ向かうときだけ差し替える。
