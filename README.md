@@ -24,7 +24,7 @@ intro
 git clone --recursive git@github.com:mpyw/donna-iro.git
 cd donna-iro
 git -C assets lfs pull      # 音源を取る
-tools/fetch-model.sh        # whisper のモデルを取る（tiny・74MB）
+tools/fetch-model.sh        # whisper のモデルを取る（base・141MB）
 cargo build --release
 ```
 
@@ -43,7 +43,8 @@ cargo build --release
 | `--terminal` | ウィンドウを使わず色名だけ出す |
 | `--keyboard` | マイクの代わりに手打ち |
 | `DONNA_IRO_ASSETS=<dir>` | 音源のディレクトリ |
-| `DONNA_IRO_MODEL=<file>` | whisper のモデル（既定 `models/ggml-tiny.bin`） |
+| `DONNA_IRO_MODEL=<file>` | whisper のモデル（既定 `models/ggml-base.bin`） |
+| `DONNA_IRO_AUDIO_CTX=<i32>` | エンコーダの文脈長。下げると速く、精度は落ちる |
 | `DONNA_IRO_THRESHOLD=<f32>` | 発話とみなす RMS。判定のたびに出る「最大」を見て決める |
 
 ### macOS の .app
@@ -63,7 +64,7 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 | `whisper` | 音声認識。外すとキーボード入力のみ（ビルドが数十秒で済む） |
 | `window` | ウィンドウ描画。外すとターミナルに色名だけ |
 | `embed-audio` | 音源をバイナリに埋め込む |
-| `embed-model` | whisper のモデル（tiny・74MB）も埋め込む |
+| `embed-model` | whisper のモデル（base・141MB）も埋め込む |
 | `embed` | 上の2つ。**88MB のバイナリ1つで完結**する |
 | `metal` / `coreml` | **Apple 専用。** ラズパイでは使えない |
 | `openblas` / `openmp` | ラズパイ側の加速。素でも NEON は使うので、まず無指定で測る |
@@ -159,7 +160,6 @@ private であれば公衆送信にあたらないため問題ない。本体を
 
 whisper のモデルはリポジトリには置かない。`tools/fetch-model.sh` で取る。
 
-**tiny で足りる。** 語彙が12色に閉じていて `initial_prompt` で誘導し、さらに
-編集距離で吸収するので、大きいモデルを積む理由がない。Raspberry Pi 5 で
-0.5秒前後を狙える。精度が足りなくなったら `tools/fetch-model.sh base` で
-差し替えられる。
+既定は **base**。tiny でも大人の声なら足りたが、**子どもの声では精度が
+落ちた**ため戻した。速度より当たることを優先する。
+`tools/fetch-model.sh tiny` と `DONNA_IRO_MODEL` で速度を測り比べられる。

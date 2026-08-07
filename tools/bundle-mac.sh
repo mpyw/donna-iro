@@ -24,7 +24,7 @@ for stem in intro question tail tail-lead bridge interlude all \
   red blue yellow green yellowgreen white black pink orange purple brown lightblue; do
   [ -f "assets/$stem.wav" ] || missing+=("assets/$stem.wav")
 done
-[ -f models/ggml-tiny.bin ] || missing+=("models/ggml-tiny.bin")
+[ -f models/ggml-base.bin ] || missing+=("models/ggml-base.bin")
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo ".app にするには音源とモデルを埋め込む必要があります（CWD が / になるため）。" >&2

@@ -154,12 +154,11 @@ mod mic {
         }
     }
 
-    /// tiny で足りることを実機で確認済み。語彙が12色に閉じていて
-    /// `initial_prompt` で誘導し、さらに編集距離で吸収するので、
-    /// 大きいモデルを積む理由がない。
+    /// 既定は base。tiny でも大人の声なら足りたが、**子どもの声では
+    /// 精度が落ちた**ため戻した。速度より当たることを優先する。
     ///
     /// `DONNA_IRO_MODEL` を指定すればファイルから読む。埋め込みビルドでも
-    /// これが優先されるので、base に上げたいときに使える。
+    /// これが優先されるので、tiny に落として速度を測りたいときに使える。
     fn load_model() -> Result<WhisperContext> {
         if let Ok(path) = std::env::var("DONNA_IRO_MODEL") {
             return WhisperContext::new_with_params(&path, WhisperContextParameters::default())
@@ -171,7 +170,7 @@ mod mic {
         #[cfg(feature = "embed-model")]
         {
             const MODEL: &[u8] =
-                include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ggml-tiny.bin"));
+                include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ggml-base.bin"));
             return WhisperContext::new_from_buffer_with_params(
                 MODEL,
                 WhisperContextParameters::default(),
@@ -181,7 +180,7 @@ mod mic {
 
         #[cfg(not(feature = "embed-model"))]
         {
-            let path = "models/ggml-tiny.bin";
+            let path = "models/ggml-base.bin";
             WhisperContext::new_with_params(path, WhisperContextParameters::default())
                 .with_context(|| format!("モデルを読めない: {path}（tools/fetch-model.sh で取得）"))
         }
@@ -193,11 +192,23 @@ mod mic {
             .unwrap_or(4)
     }
 
-    /// 30秒ぶんのエンコーダ文脈（1500）を、実際の音の長さに合わせて縮める。
-    /// 小さくしすぎると精度が落ちるので下限を設けている。
+    /// エンコーダの文脈長。whisper は入力を必ず30秒（=1500）に詰めてから
+    /// エンコードするので、実際の音の長さに見合う値まで下げると速くなる。
+    ///
+    /// **ただし下げるほど精度が落ちる。** 認識は 0.2秒ほどしかかからず
+    /// 余裕があるので、下限は高めに取ってある。
+    ///
+    /// `DONNA_IRO_AUDIO_CTX` で上書きできる。1500 を指定すれば
+    /// 切り詰めなし（whisper の既定と同じ）。速度と精度を測り比べるとき用。
     fn audio_ctx(samples: usize) -> i32 {
+        if let Some(v) = std::env::var("DONNA_IRO_AUDIO_CTX")
+            .ok()
+            .and_then(|v| v.parse::<i32>().ok())
+        {
+            return v.clamp(128, 1500);
+        }
         let secs = samples as f32 / WHISPER_SR as f32;
         let proportional = ((secs + 1.0) / 30.0 * 1500.0).ceil() as i32;
-        proportional.clamp(512, 1500)
+        proportional.clamp(1024, 1500)
     }
 }
