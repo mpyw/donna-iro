@@ -142,22 +142,34 @@ fn main() -> Result<()> {
             None => play(pick_random().asset())?,
         }
 
-        // 4. 3周に1回ブリッジ（原曲 m40-47「いろ いろ いろんな いろがある」）を挟む。
-        //    同じ質問と節の往復だけだと単調になるので、区切りを入れる。
-        //    ト長調のまま終わるので、そのまま次の質問に戻れる。
+        // 4. 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
+        //    挟むものはブリッジと間奏を交互に入れ替える。
+        //    同じ区切りが毎回続くとそれ自体が単調になるため。
+        //
+        //      3周目  → bridge    いろ いろ いろんな いろがある
+        //      6周目  → interlude 間奏
+        //      9周目  → bridge
+        //      12周目 → interlude ...
+        //
+        //    どちらもト長調のまま終わるので、そのまま次の質問に戻れる。
         //
         //    「ぜんぶ！」で break した場合はここを通らない。
-        //    エンディングの後にブリッジが流れては困る。
-        if round % BRIDGE_EVERY == 0 {
-            play("assets/bridge.wav")?;
+        //    エンディングの後に区切りが流れては困る。
+        if round % INSERT_EVERY == 0 {
+            let nth = round / INSERT_EVERY;
+            if nth % 2 == 1 {
+                play("assets/bridge.wav")?;
+            } else {
+                play("assets/interlude.wav")?;
+            }
         }
     }
 
     Ok(())
 }
 
-/// 何周に1回ブリッジを挟むか。
-const BRIDGE_EVERY: u32 = 3;
+/// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
+const INSERT_EVERY: u32 = 3;
 
 /// 音声から応答を判定する。確信が持てなければ None。
 ///
