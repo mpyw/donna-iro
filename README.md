@@ -72,19 +72,22 @@ VAD やリアルタイムストリーミングが必要になったら
 
 ## 音源について
 
-**音源はリポジトリに含めない。** 曲は著作物。
-家庭内で自分の音源を使って遊ぶ分には問題ないが、コードだけを公開する形にする。
+音源は **private サブモジュール** [donna-iro-assets](https://github.com/mpyw/donna-iro-assets)
+に分離し、`assets/` にマウントする。Git LFS で管理。
 
-`assets/` に以下を置く想定（gitignore 済み）:
+曲は著作物なので、**サブモジュール側は private のまま運用すること。**
+private であれば公衆送信にあたらないため問題ない。本体を public にする場合も
+こちらは private に留める（`.gitmodules` に URL は載るが中身は保護される）。
 
+```sh
+git clone --recursive git@github.com:mpyw/donna-iro.git
+# または既存のクローンで
+git submodule update --init
+cd assets && git lfs pull
 ```
-assets/
-  question.wav      # 「どんないろがすき？」
-  red.wav           # あかの続き
-  blue.wav
-  yellow.wav
-  ...
-```
+
+配置するファイルは [donna-iro-assets の README](https://github.com/mpyw/donna-iro-assets)
+を参照。ファイル名は `src/main.rs` の `Color::asset()` と対応させる。
 
 ## MVP
 

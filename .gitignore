@@ -1,18 +1,10 @@
-# 音源は著作物なのでコミットしない
-assets/*
-!assets/.gitkeep
+# 音源は assets/ サブモジュール (private) で管理する。ここには置かない。
 
-# 収録した音声サンプル（子どもの声）もコミットしない
+# 収録した音声サンプル（子どもの声）
 recordings/
 samples/
-*.wav
-*.mp3
-*.m4a
-*.flac
 
 # whisper のモデルファイル
-*.tflite
-*.onnx
 *.gguf
 *.bin
 models/
