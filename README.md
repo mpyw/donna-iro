@@ -44,6 +44,7 @@ cargo build --release
 | `--keyboard` | マイクの代わりに手打ち |
 | `DONNA_IRO_ASSETS=<dir>` | 音源のディレクトリ |
 | `DONNA_IRO_MODEL=<file>` | whisper のモデル（既定 `models/ggml-tiny.bin`） |
+| `DONNA_IRO_THRESHOLD=<f32>` | 発話とみなす RMS。判定のたびに出る「最大」を見て決める |
 
 ### ビルドの切り替え
 

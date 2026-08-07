@@ -267,10 +267,21 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
 /// 短くするほど反応が速くなるが、言い淀みで切れやすくなる。
 const HANGOVER: Duration = Duration::from_millis(350);
 
-/// 起動時に環境ノイズを測る時間。しきい値をこれに合わせる。
-const FLOOR_SAMPLE: Duration = Duration::from_millis(400);
-/// 発話とみなす最低の RMS。静かな部屋でも下回らせない。
-const SPEECH_FLOOR: f32 = 0.03;
+/// 起動時に環境ノイズを測る回数。刻んで中央値を取る。
+/// 400ms を丸ごと平均すると、その瞬間の物音ひとつで跳ね上がる。
+const FLOOR_CHUNKS: usize = 8;
+/// 発話とみなす最低の RMS。環境ノイズが極端に低いときの下限。
+///
+/// 0.03（≒ -30dBFS）にしていたが、2〜3m 離れた子どもの声だと届かない。
+/// 200ms 窓の平均を見ているので、短い叫び声はさらに平均されて下がる。
+/// MIN_SPEECH で持続を要求しているぶん、低めでも誤発火しにくい。
+///
+/// 部屋やマイクに合わせて DONNA_IRO_THRESHOLD で上書きできる。
+/// 判定のたびに出る「最大 0.0xx」を見て決めるとよい。
+const SPEECH_FLOOR: f32 = 0.012;
+/// しきい値の上限。起動時にたまたま騒がしいと環境ノイズを高く見積もり、
+/// そのまま一生聞こえなくなる。測り間違いの被害をここで止める。
+const SPEECH_CEIL: f32 = 0.05;
 /// 窓を開けた直後、スピーカーの残響で誤発火しないよう待つ。
 /// **録音自体は続ける**ので、この間に話し始めても声は残る。
 const GUARD: Duration = Duration::from_millis(200);
@@ -335,12 +346,21 @@ impl Ears {
 
         // 環境ノイズを測ってしきい値を決める。部屋の静かさは
         // 環境によって桁が違うので、固定値だと誤発火か取りこぼしになる。
-        std::thread::sleep(FLOOR_SAMPLE);
-        let floor = {
-            let b = buf.lock().unwrap();
-            rms(&b)
-        };
-        let threshold = (floor * 4.0).max(SPEECH_FLOOR);
+        //
+        // 刻んで中央値を取る。連続した区間の平均だと、測っている最中に
+        // 物音がひとつ入るだけで倍以上ずれる。
+        let mut levels = Vec::with_capacity(FLOOR_CHUNKS);
+        for _ in 0..FLOOR_CHUNKS {
+            buf.lock().unwrap().clear();
+            std::thread::sleep(TICK * 2);
+            levels.push(rms(&buf.lock().unwrap()));
+        }
+        levels.sort_by(|a, b| a.total_cmp(b));
+        let floor = levels[FLOOR_CHUNKS / 2];
+        let threshold = std::env::var("DONNA_IRO_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or_else(|| (floor * 4.0).clamp(SPEECH_FLOOR, SPEECH_CEIL));
         eprintln!("  環境ノイズ {floor:.4} → しきい値 {threshold:.4}");
 
         Ok(Self {
@@ -367,6 +387,9 @@ impl Ears {
         let mut voiced = Duration::ZERO;
         let mut heard = false;
         let mut quiet_since: Option<Instant> = None;
+        // しきい値を決める材料。声が届いていたのに拾えなかったのか、
+        // そもそも何も鳴っていなかったのかを切り分けるために出す。
+        let mut loudest = 0.0f32;
 
         while start.elapsed() < max {
             std::thread::sleep(TICK);
@@ -380,6 +403,7 @@ impl Ears {
             if start.elapsed() < GUARD {
                 continue;
             }
+            loudest = loudest.max(level);
 
             if level > self.threshold {
                 // 単発のノイズで発火しないよう、続いた時間を見る。
@@ -400,9 +424,11 @@ impl Ears {
         }
 
         eprintln!(
-            "  {} （{:.1}秒待った）",
+            "  {} （{:.1}秒待った / 最大 {:.4} vs しきい値 {:.4}）",
             if heard { "聞こえた" } else { "無言" },
-            start.elapsed().as_secs_f32()
+            start.elapsed().as_secs_f32(),
+            loudest,
+            self.threshold
         );
         if !heard {
             return Ok(None);
