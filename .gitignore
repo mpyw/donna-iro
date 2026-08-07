@@ -1,0 +1,29 @@
+# 音源は著作物なのでコミットしない
+assets/*
+!assets/.gitkeep
+
+# 収録した音声サンプル（子どもの声）もコミットしない
+recordings/
+samples/
+*.wav
+*.mp3
+*.m4a
+*.flac
+
+# 学習済みモデル
+*.tflite
+*.onnx
+*.pt
+*.bin
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.python-version
+*.egg-info/
+
+# macOS
+.DS_Store
