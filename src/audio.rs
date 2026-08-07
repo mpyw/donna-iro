@@ -270,23 +270,28 @@ const HANGOVER: Duration = Duration::from_millis(350);
 /// 起動時に環境ノイズを測る回数。刻んで中央値を取る。
 /// 400ms を丸ごと平均すると、その瞬間の物音ひとつで跳ね上がる。
 const FLOOR_CHUNKS: usize = 8;
-/// 発話とみなす最低の RMS。環境ノイズが極端に低いときの下限。
-///
-/// 0.03（≒ -30dBFS）にしていたが、2〜3m 離れた子どもの声だと届かない。
-/// 200ms 窓の平均を見ているので、短い叫び声はさらに平均されて下がる。
-/// MIN_SPEECH で持続を要求しているぶん、低めでも誤発火しにくい。
-///
-/// 部屋やマイクに合わせて DONNA_IRO_THRESHOLD で上書きできる。
-/// 判定のたびに出る「最大 0.0xx」を見て決めるとよい。
-const SPEECH_FLOOR: f32 = 0.012;
-/// しきい値の上限。起動時にたまたま騒がしいと環境ノイズを高く見積もり、
-/// そのまま一生聞こえなくなる。測り間違いの被害をここで止める。
-const SPEECH_CEIL: f32 = 0.05;
+// --- 発話とみなす基準 ---
+//
+// **拾いすぎのコストはほぼゼロ。** 誤検出しても whisper がノイズを
+// 文字起こしして判定が None になり、ランダムな色が鳴る。何も聞こえ
+// なかった場合と結果が同じで、損するのは認識の 0.2秒だけ。
+//
+// 逆に取りこぼすと、子どもが答えたのに無視されることになる。
+// 明らかに非対称なので、迷ったら拾う側に倒す。
+
+/// 環境ノイズの何倍を発話とみなすか。
+const SPEECH_RATIO: f32 = 2.0;
+/// しきい値の下限。
+const SPEECH_FLOOR: f32 = 0.005;
+/// しきい値の上限。環境ノイズを高く見積もったまま固まると、
+/// いくら叫んでも届かなくなる。被害をここで止める。
+const SPEECH_CEIL: f32 = 0.015;
 /// 窓を開けた直後、スピーカーの残響で誤発火しないよう待つ。
 /// **録音自体は続ける**ので、この間に話し始めても声は残る。
 const GUARD: Duration = Duration::from_millis(200);
 /// これだけ続けて初めて「聞こえた」とみなす。単発のノイズを弾く。
-const MIN_SPEECH: Duration = Duration::from_millis(120);
+/// 短くするほど拾いやすくなる。誤検出は無害なので短めに取る。
+const MIN_SPEECH: Duration = Duration::from_millis(75);
 /// 監視の刻み。
 const TICK: Duration = Duration::from_millis(25);
 
@@ -299,8 +304,10 @@ pub struct Ears {
     _stream: cpal::Stream,
     buf: Arc<Mutex<Vec<f32>>>,
     rate: u32,
-    /// 発話とみなす RMS。起動時の環境ノイズから決める。
-    threshold: f32,
+    /// 環境ノイズの推定値。毎回の観測で更新する。
+    floor: f32,
+    /// 利用者が明示指定したしきい値。あればこれで固定。
+    fixed: Option<f32>,
 }
 
 impl Ears {
@@ -357,18 +364,38 @@ impl Ears {
         }
         levels.sort_by(|a, b| a.total_cmp(b));
         let floor = levels[FLOOR_CHUNKS / 2];
-        let threshold = std::env::var("DONNA_IRO_THRESHOLD")
+        let fixed = std::env::var("DONNA_IRO_THRESHOLD")
             .ok()
-            .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or_else(|| (floor * 4.0).clamp(SPEECH_FLOOR, SPEECH_CEIL));
-        eprintln!("  環境ノイズ {floor:.4} → しきい値 {threshold:.4}");
-
-        Ok(Self {
+            .and_then(|v| v.parse::<f32>().ok());
+        let ears = Self {
             _stream: stream,
             buf,
             rate,
-            threshold,
-        })
+            floor,
+            fixed,
+        };
+        eprintln!("  環境ノイズ {floor:.4} → しきい値 {:.4}", ears.threshold());
+        Ok(ears)
+    }
+
+    fn threshold(&self) -> f32 {
+        self.fixed
+            .unwrap_or_else(|| (self.floor * SPEECH_RATIO).clamp(SPEECH_FLOOR, SPEECH_CEIL))
+    }
+
+    /// 環境ノイズの推定を観測で更新する。
+    ///
+    /// 起動時の一発勝負にすると、その瞬間たまたま騒がしかっただけで
+    /// セッション全体が聞こえなくなる。実際に上限に張り付いた。
+    ///
+    /// 静かになったら即座に追従し、うるさくなったらゆっくり上げる。
+    /// 逆にすると、話し声を環境ノイズと誤認して自分の首を絞める。
+    fn update_floor(&mut self, quietest: f32) {
+        self.floor = if quietest < self.floor {
+            quietest
+        } else {
+            self.floor * 0.9 + quietest * 0.1
+        };
     }
 
     /// 応答を待つ。16kHz モノラルの f32 を返す。
@@ -377,7 +404,7 @@ impl Ears {
     /// 毎回待ち切ると歌の流れが死ぬ。
     ///
     /// 何も聞こえなければ `None`。呼び出し側でランダムな色に倒す。
-    pub fn listen(&self, max: Duration) -> Result<Option<Vec<f32>>> {
+    pub fn listen(&mut self, max: Duration) -> Result<Option<Vec<f32>>> {
         // ストリームは鳴っている間も回り続けているので、直前に流した
         // 歌が溜まっている。窓を開ける前に捨てる。
         self.buf.lock().unwrap().clear();
@@ -390,6 +417,8 @@ impl Ears {
         // しきい値を決める材料。声が届いていたのに拾えなかったのか、
         // そもそも何も鳴っていなかったのかを切り分けるために出す。
         let mut loudest = 0.0f32;
+        let mut quietest = f32::MAX;
+        let threshold = self.threshold();
 
         while start.elapsed() < max {
             std::thread::sleep(TICK);
@@ -404,8 +433,9 @@ impl Ears {
                 continue;
             }
             loudest = loudest.max(level);
+            quietest = quietest.min(level);
 
-            if level > self.threshold {
+            if level > threshold {
                 // 単発のノイズで発火しないよう、続いた時間を見る。
                 voiced += TICK;
                 if voiced >= MIN_SPEECH {
@@ -423,12 +453,16 @@ impl Ears {
             }
         }
 
+        if quietest < f32::MAX {
+            self.update_floor(quietest);
+        }
         eprintln!(
-            "  {} （{:.1}秒待った / 最大 {:.4} vs しきい値 {:.4}）",
+            "  {} （{:.1}秒待った / 最大 {:.4} vs しきい値 {:.4} → 次回 {:.4}）",
             if heard { "聞こえた" } else { "無言" },
             start.elapsed().as_secs_f32(),
             loudest,
-            self.threshold
+            threshold,
+            self.threshold()
         );
         if !heard {
             return Ok(None);
