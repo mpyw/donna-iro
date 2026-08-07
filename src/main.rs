@@ -155,13 +155,27 @@ fn main() -> Result<()> {
         //
         //    「ぜんぶ！」で break した場合はここを通らない。
         //    エンディングの後に区切りが流れては困る。
-        if round % INSERT_EVERY == 0 {
-            let nth = round / INSERT_EVERY;
-            if nth % 2 == 1 {
-                play("assets/bridge.wav")?;
+        let insert = round % INSERT_EVERY == 0;
+        let interlude_next = insert && (round / INSERT_EVERY) % 2 == 0;
+
+        // 5. 節の最終小節（「ン」＋休符）。全12色で完全に同一なので
+        //    色の素材からは外してある。
+        //
+        //    間奏へ向かうときだけ助走つきの tail-lead を使う。
+        //    間奏を launch する B5→C6→D6 はアウフタクトで、
+        //    この小節に属する。間奏側の頭に置くと拍の位置が変わってしまう。
+        play(if interlude_next {
+            "assets/tail-lead.wav"
+        } else {
+            "assets/tail.wav"
+        })?;
+
+        if insert {
+            play(if interlude_next {
+                "assets/interlude.wav"
             } else {
-                play("assets/interlude.wav")?;
-            }
+                "assets/bridge.wav"
+            })?;
         }
     }
 

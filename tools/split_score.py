@@ -194,16 +194,17 @@ def refit(measure, syllables):
 
 
 def refit_verse(mm, l1, l3):
-    """6小節の節（mm[0..5]）に歌詞を当て直す。
+    """5小節の節（mm[0..4]）に歌詞を当て直す。
 
     1行目は mm[0] に l1[:-1]、最後の1音は mm[1] の頭。
-    3行目は mm[4] に l3[:-1]、最後の1音は mm[5] の頭。
+    3行目は mm[4] に l3[:-1]。最後の「ン」は次の小節に来るが、
+    そこは共通素材 tail に切り出してあるので触らない。
     2行目（いちばんさきになくなるよ）は全節共通なので触らない。
     """
+    assert l3[-1] == "ン", "3行目の最後は tail 側の「ン」"
     refit(mm[0], l1[:-1])
     set_lyric(pitched(mm[1])[0], l1[-1])
     refit(mm[4], l3[:-1])
-    set_lyric(pitched(mm[5])[0], l3[-1])
 
 
 def mute_before(measure, beat):
@@ -228,11 +229,14 @@ def rng(a, b):
 
 
 # 原曲にある4色。歌詞はそのままで音数も合っているので触らない。
+# 最終小節（「ン」＋休符）は全12色で旋律も伴奏も完全に同一なので、
+# 節からは外して tail / tail-lead に切り出す。助走はアウフタクトで
+# 前の小節に属するため、間奏の頭に置くと表現できない。
 ORIGINAL = {
-    "red": rng(6, 11),
-    "blue": rng(14, 19),
-    "yellow": rng(22, 27),
-    "green": rng(34, 39),
+    "red": rng(6, 10),
+    "blue": rng(14, 18),
+    "yellow": rng(22, 26),
+    "green": rng(34, 38),
 }
 
 # 原曲にない8色。(1行目, 3行目) の音節。
@@ -288,34 +292,6 @@ def unify_pitch(measure, i):
     cur.insert(0, copy.deepcopy(prev))
 
 
-
-def add_pickup(measure):
-    """間奏冒頭の休符（0.75拍）を、原曲 m27 末尾の助走に置き換える。
-
-    原曲では B5(0.25) C6(0.75) D6(0.25) の1.25拍だが、
-    小節の頭に収めるため16分3つ（0.25×3）に詰める。
-    """
-    lead = [("B", 5, 0), ("C", 6, 0), ("D", 6, 0)]
-    rests = [n for n in measure.findall("note") if n.find("rest") is not None]
-    head = rests[:2]                      # 冒頭の 6 + 3 = 9 divisions
-    assert sum(int(n.findtext("duration")) for n in head) == 9, "冒頭が想定と違う"
-    idx = list(measure).index(head[0])
-    for n in head:
-        measure.remove(n)
-    model = pitched(measure)[0]
-    for k, (step, octv, alter) in enumerate(lead):
-        n = copy.deepcopy(model)
-        for ly in n.findall("lyric"):
-            n.remove(ly)
-        p = n.find("pitch")
-        p.find("step").text = step
-        p.find("octave").text = str(octv)
-        for a in p.findall("alter"):
-            p.remove(a)
-        set_duration(n, 3)
-        measure.insert(idx + k, n)
-
-
 def main():
     root, measures = load()
     made = []
@@ -342,24 +318,24 @@ def main():
     # 1回目の終わりである m43 は音階内で完結しているので、
     # 最終小節のピアノだけ m43 に差し替える。
     # 旋律は m47 のまま（m43 の A5 B5 は繰り返しへの助走なので使わない）。
+    # 節の最終小節。全12色で完全に同一なので共通素材にする。
+    #   tail      = 原曲 m11。「ン」＋休符。質問やブリッジへ向かうとき。
+    #   tail-lead = 原曲 m27。「ン」＋休符＋助走(B5 C6 D6)。間奏へ向かうとき。
+    # どちらも原曲そのままで、編曲していない。
+    emit("tail", ["11"], 1)
+    emit("tail-lead", ["27"], 1)
+
     emit("bridge", {"P1": rng(40, 47),
                     "P2": rng(40, 46) + ["43"]}, 1)
 
     # 間奏。
     #
-    # m27 は「きいろ」の節の最終小節であって間奏ではない。末尾にある
-    # 3音の助走（B5 C6 D6）を拾うために含めていたが、m27 の伴奏は
-    # どの節の最終小節とも完全に同一なので、節のあとに間奏を流すと
-    # 同じ伴奏が2小節続いてしまう。助走を捨てて m28 から始める。
-    # 間奏。
-    #
     # m27 は「きいろ」の節の最終小節であって間奏ではない。その伴奏は
     # どの節の最終小節とも完全に同一なので、含めると同じ伴奏が2小節続く。
-    # かわりに m27 末尾の助走（B5 C6 D6）を m28 冒頭の休符に詰めて置く。
-    # 助走を単に捨てると、節の3拍の休みと間奏頭の0.75拍が繋がって
-    # 旋律のない時間が約1.8秒でき、繋がって聴こえなくなる。
-    emit("interlude", rng(28, 31), 1,
-         lambda pid, num, m: add_pickup(m) if pid == "P1" and num == "28" else None)
+    #
+    # 末尾の助走（B5 C6 D6）はアウフタクトで前の小節に属するため、
+    # 間奏側には置かない。tail-lead（＝原曲 m27）が持つ。
+    emit("interlude", rng(28, 31), 1)
 
     # ぜんぶ＋エンディング。
     #
@@ -387,7 +363,7 @@ def main():
         if name in HOLD_L1:
             apply_durations(mm[0], HOLD_L1[name])
             unify_pitch(mm[0], HOLD_AT[name])
-        made.append((name, 6, write(out, name)))
+        made.append((name, len(ORIGINAL["red"]), write(out, name)))
 
     for name, n, path in made:
         print(f"{name:<12} {n:>2}小節  {path}")
