@@ -30,18 +30,45 @@ pub const ALL_READING: &str = "ぜんぶ";
 const PROMPT: &[&str] = &["どんないろがすき", "どんないろ", "どんな"];
 
 /// 許容する編集距離。短い読みほど厳しくする。
-/// 「あか」と「あお」は1文字違いなので、緩めると取り違える。
-fn allowed(reading_len: usize) -> usize {
-    if reading_len <= 4 {
-        1
-    } else {
-        2
+///
+/// 単位は `substitution` の重みなので、2 が「1音ぶんのずれ」にあたる。
+/// 2文字の読みは1音、3文字以上は1音半まで許す。
+///
+/// **「ぜんぶ」だけは1音までに絞る。** 誤検出するとゲームが終わって
+/// しまうため。3文字ぶん許すと「でんわ」あたりが引っかかる。
+/// 逆に取りこぼしても次の周回でまた聞けるので、そちらの害は小さい。
+fn allowed(answer: Answer, reading_len: usize) -> usize {
+    match answer {
+        Answer::All => 2,
+        Answer::Color(_) if reading_len <= 2 => 2,
+        Answer::Color(_) => 3,
     }
+}
+
+/// 拗音と長音を落とした骨格。編集距離を測るときだけ使う。
+///
+/// 幼児の発音は「ぜ」が「じぇ」に、「ぶ」が「ば」に寄る。小書き文字と
+/// 長音符が入ると字数がずれて、素の編集距離では届かなくなる。
+/// 落としてから比べると、残るのは子音・母音のずれだけになる。
+///
+/// 読みの側も同じ関数を通すので、「ちゃいろ」が「ちいろ」に潰れても
+/// 両側が揃っていて問題ない。
+fn skeleton(s: &str) -> Vec<char> {
+    s.chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                'ー' | 'ぁ' | 'ぃ' | 'ぅ' | 'ぇ' | 'ぉ' | 'ゃ' | 'ゅ' | 'ょ' | 'ゎ' | 'っ'
+            )
+        })
+        .collect()
 }
 
 pub struct Matcher {
     /// 正規化済みの (応答, 読み)。長い読みから順に並べてある。
     candidates: Vec<(Answer, String)>,
+    /// 同じものの骨格。編集距離用。
+    skeletons: Vec<(Answer, Vec<char>)>,
 }
 
 impl Default for Matcher {
@@ -60,7 +87,11 @@ impl Matcher {
         // 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
         // あるので、部分一致は長い読みから試さないと取りこぼす。
         candidates.sort_by_key(|(_, r)| std::cmp::Reverse(r.chars().count()));
-        Self { candidates }
+        let skeletons = candidates.iter().map(|(a, r)| (*a, skeleton(r))).collect();
+        Self {
+            candidates,
+            skeletons,
+        }
     }
 
     pub fn find(&self, raw: &str) -> Option<Answer> {
@@ -90,12 +121,12 @@ impl Matcher {
         }
 
         // 3. 編集距離。読みは色ごとに1つなので、ゆれはここで吸収する。
-        let chars: Vec<char> = text.chars().collect();
+        //    拗音と長音を落とした骨格で比べる。
+        let chars = skeleton(text);
         let mut scores: Vec<(Answer, usize)> = Vec::new();
-        for (a, r) in self.candidates.iter() {
-            let rc: Vec<char> = r.chars().collect();
-            let d = levenshtein(&chars, &rc);
-            if d > allowed(rc.len()) {
+        for (a, r) in self.skeletons.iter() {
+            let d = levenshtein(&chars, r);
+            if d > allowed(*a, r.len()) {
                 continue;
             }
             scores.push((*a, d));
@@ -159,15 +190,70 @@ fn strip_prompt(s: &str) -> String {
     out
 }
 
-/// 編集距離。日本語なのでバイトではなく文字単位で測る。
+/// 五十音表。行の子音と、あいうえお順の並び。
+/// `_` はその行に無い音。
+const ROWS: &[(u8, &str)] = &[
+    (b'-', "あいうえお"),
+    (b'k', "かきくけこ"),
+    (b's', "さしすせそ"),
+    (b't', "たちつてと"),
+    (b'n', "なにぬねの"),
+    (b'h', "はひふへほ"),
+    (b'm', "まみむめも"),
+    (b'y', "や_ゆ_よ"),
+    (b'r', "らりるれろ"),
+    (b'w', "わ___を"),
+    (b'g', "がぎぐげご"),
+    (b'z', "ざじずぜぞ"),
+    (b'd', "だぢづでど"),
+    (b'b', "ばびぶべぼ"),
+    (b'p', "ぱぴぷぺぽ"),
+];
+
+/// 仮名を（子音, 母音）に分ける。表に無ければ `None`。
+fn decompose(c: char) -> Option<(u8, usize)> {
+    ROWS.iter().find_map(|(consonant, row)| {
+        row.chars()
+            .position(|k| k == c)
+            .map(|vowel| (*consonant, vowel))
+    })
+}
+
+/// 置換の重み。
+///
+/// 素の編集距離だと、文字が違えば一律1になる。それだと
+/// 「じ→ぜ」（同じザ行）と「ば→く」（無関係）が同じ扱いになり、
+/// 「じんば」が「ぜんぶ」と「ぴんく」の両方から等距離になってしまう。
+///
+/// 子音と母音を別々に数えると、音として近いほど安くなる。
+///   じ→ぜ  子音 z=z、母音 i≠e        → 1
+///   ば→ぶ  子音 b=b、母音 a≠u        → 1
+///   ば→く  子音 b≠k、母音 a≠u        → 2
+fn substitution(a: char, b: char) -> usize {
+    if a == b {
+        return 0;
+    }
+    match (decompose(a), decompose(b)) {
+        (Some((ca, va)), Some((cb, vb))) => usize::from(ca != cb) + usize::from(va != vb),
+        // 「ん」や表に無い文字。似ている度合いを測れないので別物とみなす。
+        _ => 2,
+    }
+}
+
+/// 挿入・削除の重み。置換の最大と揃えて、
+/// 「1音ぶんのずれ」がどの操作でも同じ値になるようにする。
+const INDEL: usize = 2;
+
+/// 音の近さで重み付けした編集距離。日本語なので文字単位で測る。
 fn levenshtein(a: &[char], b: &[char]) -> usize {
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut prev: Vec<usize> = (0..=b.len()).map(|i| i * INDEL).collect();
     let mut cur: Vec<usize> = vec![0; b.len() + 1];
     for (i, ca) in a.iter().enumerate() {
-        cur[0] = i + 1;
+        cur[0] = (i + 1) * INDEL;
         for (j, cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+            cur[j + 1] = (prev[j + 1] + INDEL)
+                .min(cur[j] + INDEL)
+                .min(prev[j] + substitution(*ca, *cb));
         }
         std::mem::swap(&mut prev, &mut cur);
     }
@@ -219,15 +305,27 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_one_char_difference_is_rejected() {
-        // 「あか」からも「あお」からも距離1。割れたまま採用すると取り違える。
-        assert_eq!(find("あき"), None);
+    fn closest_sounding_color_wins() {
+        // 「あき」は「あか」（カ行の母音違い）のほうが
+        // 「あお」（子音も母音も違う）より近い。
+        assert_eq!(find("あき"), c(Color::Red));
     }
 
     #[test]
     fn all_absorbs_small_slips() {
         assert_eq!(find("ぜんぷ"), Some(Answer::All));
         assert_eq!(find("ぜんむ"), Some(Answer::All));
+        // 実際に出た形。拗音と長音を落とすと「じんば」で距離2。
+        assert_eq!(find("ジェンバー"), Some(Answer::All));
+        assert_eq!(find("じゃんぶー"), Some(Answer::All));
+    }
+
+    #[test]
+    fn all_does_not_fire_on_distant_words() {
+        // 音が2つずれるものまで拾うとゲームが事故で終わる。
+        assert_ne!(find("でんわ"), Some(Answer::All));
+        assert_ne!(find("わんわん"), Some(Answer::All));
+        assert_ne!(find("ごはん"), Some(Answer::All));
     }
 
     #[test]
@@ -263,10 +361,19 @@ mod tests {
     }
 
     #[test]
-    fn levenshtein_basics() {
-        let a: Vec<char> = "あか".chars().collect();
-        let b: Vec<char> = "あお".chars().collect();
-        assert_eq!(levenshtein(&a, &a), 0);
-        assert_eq!(levenshtein(&a, &b), 1);
+    fn levenshtein_weighs_by_sound() {
+        let d = |x: &str, y: &str| {
+            let a: Vec<char> = x.chars().collect();
+            let b: Vec<char> = y.chars().collect();
+            levenshtein(&a, &b)
+        };
+        assert_eq!(d("あか", "あか"), 0);
+        // 同じ行なら母音のずれだけ
+        assert_eq!(d("じ", "ぜ"), 1);
+        assert_eq!(d("ば", "ぶ"), 1);
+        // 子音も母音も違えば2
+        assert_eq!(d("ば", "く"), 2);
+        // 「じんば」は「ぴんく」より「ぜんぶ」に近い
+        assert!(d("じんば", "ぜんぶ") < d("じんば", "ぴんく"));
     }
 }
