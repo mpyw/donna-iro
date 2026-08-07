@@ -24,7 +24,9 @@ pub enum Color {
 }
 
 impl Color {
-    pub const ALL: [Color; 12] = [
+    pub const COUNT: usize = 12;
+
+    pub const ALL: [Color; Self::COUNT] = [
         Color::Red,
         Color::Blue,
         Color::Yellow,

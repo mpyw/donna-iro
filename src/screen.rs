@@ -10,10 +10,20 @@ pub type Rgb = (u8, u8, u8);
 /// 今なにを映すか。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Frame {
-    /// 全色を並べる。質問・区切り・「ぜんぶ」のとき。
-    Palette,
+    /// 全色を並べる。質問・区切りのとき。
+    ///
+    /// 並び順を持つのは、フィナーレで位置ごとに色を入れ替えるため。
+    /// 通常は `Color::ALL` の順。
+    Palette([Color; Color::COUNT]),
     /// 1色だけ大きく。その色のフレーズを歌っている間。
     Single(Color),
+}
+
+impl Frame {
+    /// 既定の並びの全色。
+    pub fn palette() -> Frame {
+        Frame::Palette(Color::ALL)
+    }
 }
 
 pub trait Screen: Send {
@@ -44,7 +54,11 @@ pub struct Terminal;
 impl Screen for Terminal {
     fn show(&mut self, frame: Frame) {
         match frame {
-            Frame::Palette => println!("── ぜんぶ ──"),
+            Frame::Palette(order) if order == Color::ALL => println!("── ぜんぶ ──"),
+            Frame::Palette(order) => {
+                let names: Vec<&str> = order.iter().map(|c| c.name()).collect();
+                println!("── {} ──", names.join(" "));
+            }
             Frame::Single(c) => println!("● {}", c.name()),
         }
     }

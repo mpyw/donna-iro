@@ -12,7 +12,6 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use anyhow::{Context, Result};
 use minifb::{Key, Window, WindowOptions};
 
-use crate::color::Color;
 use crate::screen::{border, Frame, Rgb, Screen};
 
 const WIDTH: usize = 1280;
@@ -46,7 +45,7 @@ pub fn run(rx: Receiver<Frame>) -> Result<()> {
     window.set_target_fps(FPS as usize);
 
     let mut buf = vec![0u32; WIDTH * HEIGHT];
-    let mut frame = Frame::Palette;
+    let mut frame = Frame::palette();
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         // 溜まっているぶんは捨てて最新だけ描く。
@@ -76,14 +75,14 @@ fn paint(buf: &mut [u32], frame: Frame) {
             let r = (HEIGHT as f32 * 0.38) as i32;
             circle(buf, WIDTH as i32 / 2, HEIGHT as i32 / 2, r, c.rgb());
         }
-        Frame::Palette => {
+        Frame::Palette(order) => {
             // 4列×3行。テレビで見たときに一番収まりがいい。
             let cols = 4usize;
-            let rows = Color::ALL.len().div_ceil(cols);
+            let rows = order.len().div_ceil(cols);
             let cw = WIDTH / cols;
             let ch = HEIGHT / rows;
             let r = (cw.min(ch) as f32 * 0.36) as i32;
-            for (i, c) in Color::ALL.iter().enumerate() {
+            for (i, c) in order.iter().enumerate() {
                 let cx = (i % cols) * cw + cw / 2;
                 let cy = (i / cols) * ch + ch / 2;
                 circle(buf, cx as i32, cy as i32, r, c.rgb());

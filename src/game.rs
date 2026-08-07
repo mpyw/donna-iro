@@ -55,7 +55,7 @@ impl Game {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        self.screen.show(Frame::Palette);
+        self.screen.show(Frame::palette());
         self.player.play(Cue::Intro)?;
 
         // 「ぜんぶ！」と言うまで無限に続く。何度でも好きな色を
@@ -65,7 +65,7 @@ impl Game {
             round += 1;
 
             // まだ色が決まっていないので全色を出す。
-            self.screen.show(Frame::Palette);
+            self.screen.show(Frame::palette());
 
             // 質問は**鳴り止んだ時点で返る**。末尾の合いの手枠は
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
@@ -102,7 +102,7 @@ impl Game {
             })?;
 
             if insert {
-                self.screen.show(Frame::Palette);
+                self.screen.show(Frame::palette());
                 self.player.play(if interlude_next {
                     Cue::Interlude
                 } else {
@@ -120,12 +120,56 @@ impl Game {
     fn finale(&mut self) -> Result<()> {
         let timing = self.player.begin(Cue::Finale)?;
         let end = Instant::now() + timing.total;
+        let mut order = Color::ALL;
         while Instant::now() < end {
-            self.screen.show(Frame::Single(Color::random()));
+            order = shuffle(&order);
+            self.screen.show(Frame::Palette(order));
             let left = end.saturating_duration_since(Instant::now());
             std::thread::sleep(FLASH.min(left));
         }
-        self.screen.show(Frame::Palette);
+        self.screen.show(Frame::palette());
         Ok(())
+    }
+}
+
+/// どの位置も前回と違う色になるように並べ替える。
+///
+/// 同じ場所が同じ色のままだと「入れ替わった」ように見えない。
+/// 完全順列（derangement）になるまで引き直す。12色なら
+/// 当たる確率が 1/e ≒ 37% なので、数回で決まる。
+fn shuffle(prev: &[Color; Color::COUNT]) -> [Color; Color::COUNT] {
+    use rand::seq::SliceRandom;
+    let mut rng = rand::thread_rng();
+    loop {
+        let mut next = *prev;
+        next.shuffle(&mut rng);
+        if next.iter().zip(prev.iter()).all(|(a, b)| a != b) {
+            return next;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shuffle_moves_every_position() {
+        let mut order = Color::ALL;
+        for _ in 0..200 {
+            let next = shuffle(&order);
+            // 全色が1つずつ残っている
+            let mut a = next;
+            a.sort_by_key(|c| c.stem());
+            let mut b = Color::ALL;
+            b.sort_by_key(|c| c.stem());
+            assert_eq!(a, b, "色が増減している");
+            // どの位置も色が変わっている
+            assert!(
+                next.iter().zip(order.iter()).all(|(x, y)| x != y),
+                "同じ位置に同じ色が残った"
+            );
+            order = next;
+        }
     }
 }
