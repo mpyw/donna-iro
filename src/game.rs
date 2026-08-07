@@ -1,0 +1,118 @@
+//! 進行。
+//!
+//! ```text
+//! intro
+//!   ↓
+//! ┌→ question            どんないろがすき？（ト長調）
+//! │    ↓ 最大5秒待つ（何も言わなければランダムな色）
+//! │  <color>              その色の節（5小節・ト長調）
+//! │    ↓
+//! │  tail / tail-lead     節の最終小節。間奏へ向かうときだけ助走つき
+//! │    ↓
+//! │  bridge / interlude   3周に1回、交互に挟む
+//! └──┘                    「ぜんぶ！」と言うまで無限ループ
+//!      ↓「ぜんぶ！」
+//!    finale               転調 → ぜんぶの節 → エンディング
+//! ```
+//!
+//! 要点は**無反応にしないこと**。判定できなくても必ず何かを鳴らす。
+
+use std::time::Duration;
+
+use anyhow::Result;
+
+use crate::audio::Player;
+use crate::color::Color;
+use crate::cue::Cue;
+use crate::display::Screen;
+use crate::listener::Listener;
+use crate::matcher::{Answer, Matcher};
+
+/// 応答を待つ最大時間。2歳児は考えてから言うので短すぎると取りこぼす。
+const LISTEN_MAX: Duration = Duration::from_secs(5);
+
+/// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
+const INSERT_EVERY: u32 = 3;
+
+pub struct Game {
+    player: Player,
+    screen: Screen,
+    matcher: Matcher,
+    ears: Box<dyn Listener>,
+}
+
+impl Game {
+    pub fn new(player: Player, ears: Box<dyn Listener>) -> Self {
+        Self {
+            player,
+            screen: Screen::new(),
+            matcher: Matcher::new(),
+            ears,
+        }
+    }
+
+    pub fn run(&mut self) -> Result<()> {
+        self.show_palette();
+        self.player.play(Cue::Intro)?;
+
+        // 「ぜんぶ！」と言うまで無限に続く。何度でも好きな色を
+        // 答えられるのがこの遊びの本体なので、回数の上限は設けない。
+        let mut round: u32 = 0;
+        loop {
+            round += 1;
+
+            // まだ色が決まっていないので全色を出す。
+            self.show_palette();
+
+            // 質問は**鳴り止んだ時点で返る**。末尾の合いの手枠は
+            // 無音のまま裏で流れ続け、そこが応答の窓になる。
+            self.player.play_until_quiet(Cue::Question)?;
+
+            let heard = self.ears.hear(LISTEN_MAX)?;
+            let answer = heard.as_deref().and_then(|t| self.matcher.find(t));
+
+            if answer == Some(Answer::All) {
+                self.show_palette();
+                self.player.play(Cue::Finale)?;
+                return Ok(());
+            }
+
+            // 聞き取れなければランダムな色。黙ってはいけない。
+            // ここで All に倒してはならない。事故で終わってしまう。
+            let color = match answer {
+                Some(Answer::Color(c)) => c,
+                _ => Color::random(),
+            };
+            self.screen.show(&crate::display::one(color.rgb()));
+            self.player.play(Cue::Color(color))?;
+
+            // 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
+            // 挟むものはブリッジと間奏を交互に入れ替える。同じ区切りが
+            // 毎回続くとそれ自体が単調になるため。
+            let insert = round % INSERT_EVERY == 0;
+            let interlude_next = insert && (round / INSERT_EVERY) % 2 == 0;
+
+            // 節の最終小節。間奏を launch する助走はアウフタクトで
+            // この小節に属するので、間奏へ向かうときだけ差し替える。
+            self.player.play(if interlude_next {
+                Cue::TailLead
+            } else {
+                Cue::Tail
+            })?;
+
+            if insert {
+                self.show_palette();
+                self.player.play(if interlude_next {
+                    Cue::Interlude
+                } else {
+                    Cue::Bridge
+                })?;
+            }
+        }
+    }
+
+    fn show_palette(&mut self) {
+        let rgbs: Vec<_> = Color::ALL.iter().map(|c| c.rgb()).collect();
+        self.screen.show(&crate::display::all(&rgbs));
+    }
+}

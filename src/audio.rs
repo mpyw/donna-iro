@@ -4,16 +4,25 @@
 //! Raspberry Pi では ALSA を裏で使う。ソースは共通のままでよい。
 
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use rodio::Source;
+
+use crate::cue::Cue;
 
 /// whisper が受け取るサンプリングレート。
 pub const WHISPER_SR: u32 = 16_000;
+
+/// これを下回れば無音とみなす振幅。再生側の末尾検出と録音側の
+/// 打ち切り判定で同じ基準を使う。
+const SILENCE: f32 = 0.02;
+
+// ---------------------------------------------------------------- 再生
 
 /// 出力ストリームを持ち回す。再生のたびに開き直すと
 /// デバイスの初期化で無視できない間が空く。
@@ -29,26 +38,125 @@ impl Player {
         Ok(Self { _stream, handle })
     }
 
-    /// 素材名（拡張子なし）を再生し終わるまで待つ。
-    pub fn play(&self, stem: &str) -> Result<()> {
+    /// 鳴らし終わるまで待つ。
+    pub fn play(&self, cue: Cue) -> Result<()> {
+        self.start(cue, false)
+    }
+
+    /// **音が鳴り止んだ時点で返す。** 末尾の無音は裏で流したままにする。
+    ///
+    /// `question.wav` の末尾には原曲の合いの手枠が約1秒ぶん無音で入って
+    /// いる。そこがまさに子どもが答える瞬間なので、鳴らし切ってから
+    /// 聞き始めると完全に手遅れになる。
+    ///
+    /// 無音の長さは素材から測る。決め打ちにすると、つくよみちゃんの音源に
+    /// 差し替えたときに合わなくなる。
+    pub fn play_until_quiet(&self, cue: Cue) -> Result<()> {
+        self.start(cue, true)
+    }
+
+    fn start(&self, cue: Cue, early: bool) -> Result<()> {
+        let clip = Clip::load(cue)?;
+        let wait = if early { clip.audible() } else { clip.total() };
         let sink = rodio::Sink::try_new(&self.handle)?;
+        sink.append(clip.into_source());
+        std::thread::sleep(wait);
+        // 残り（末尾の無音）は裏で流し切らせる。
+        sink.detach();
+        Ok(())
+    }
+}
+
+/// 復号済みの音。長さと末尾の無音を測るために一度メモリに載せる。
+struct Clip {
+    samples: Vec<f32>,
+    channels: u16,
+    rate: u32,
+}
+
+impl Clip {
+    fn load(cue: Cue) -> Result<Self> {
+        let decoder = rodio::Decoder::new(Media::open(cue)?)?;
+        let channels = decoder.channels();
+        let rate = decoder.sample_rate();
+        let samples: Vec<f32> = decoder.convert_samples().collect();
+        Ok(Self {
+            samples,
+            channels,
+            rate,
+        })
+    }
+
+    fn frames(&self, n: usize) -> Duration {
+        Duration::from_secs_f64(n as f64 / self.rate as f64)
+    }
+
+    fn total(&self) -> Duration {
+        self.frames(self.samples.len() / self.channels as usize)
+    }
+
+    /// 末尾の無音を除いた長さ。
+    fn audible(&self) -> Duration {
+        let last = self
+            .samples
+            .iter()
+            .rposition(|s| s.abs() > SILENCE)
+            .map(|i| i / self.channels as usize + 1)
+            .unwrap_or(0);
+        self.frames(last)
+    }
+
+    fn into_source(self) -> rodio::buffer::SamplesBuffer<f32> {
+        rodio::buffer::SamplesBuffer::new(self.channels, self.rate, self.samples)
+    }
+}
+
+// ---------------------------------------------------------------- 素材の在処
+
+/// ファイルから読むか、バイナリに埋め込んだものを読むか。
+/// `rodio::Decoder` に渡すため、どちらも同じ型にまとめる。
+enum Media {
+    File(BufReader<File>),
+    #[cfg(feature = "embed")]
+    Memory(std::io::Cursor<&'static [u8]>),
+}
+
+impl Media {
+    fn open(cue: Cue) -> Result<Self> {
+        let stem = cue.stem();
 
         // 埋め込みがあり、かつディレクトリ指定で上書きされていなければ
         // バイナリの中から鳴らす。
         #[cfg(feature = "embed")]
         if asset_dir_override().is_none() {
-            let bytes = embedded(stem)
-                .with_context(|| format!("埋め込まれていない素材: {stem}"))?;
-            sink.append(rodio::Decoder::new(std::io::Cursor::new(bytes))?);
-            sink.sleep_until_end();
-            return Ok(());
+            let bytes =
+                embedded(stem).with_context(|| format!("埋め込まれていない素材: {stem}"))?;
+            return Ok(Media::Memory(std::io::Cursor::new(bytes)));
         }
 
         let path = asset_path(stem);
         let file = File::open(&path).with_context(|| format!("音源がない: {}", path.display()))?;
-        sink.append(rodio::Decoder::new(BufReader::new(file))?);
-        sink.sleep_until_end();
-        Ok(())
+        Ok(Media::File(BufReader::new(file)))
+    }
+}
+
+impl Read for Media {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Media::File(f) => f.read(buf),
+            #[cfg(feature = "embed")]
+            Media::Memory(c) => c.read(buf),
+        }
+    }
+}
+
+impl Seek for Media {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        match self {
+            Media::File(f) => f.seek(pos),
+            #[cfg(feature = "embed")]
+            Media::Memory(c) => c.seek(pos),
+        }
     }
 }
 
@@ -91,8 +199,8 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
     FILES.iter().find(|(n, _)| *n == stem).map(|(_, b)| *b)
 }
 
-/// 無音とみなす振幅。マイクのノイズフロアより上、囁き声より下を狙う。
-const SILENCE: f32 = 0.02;
+// ---------------------------------------------------------------- 録音
+
 /// 声が途切れてから打ち切るまでの猶予。
 /// 短くするほど反応が速くなるが、言い淀みで切れやすくなる。
 const HANGOVER: Duration = Duration::from_millis(350);
@@ -105,7 +213,7 @@ const HANGOVER: Duration = Duration::from_millis(350);
 pub struct Ears {
     _stream: cpal::Stream,
     buf: Arc<Mutex<Vec<f32>>>,
-    sample_rate: u32,
+    rate: u32,
 }
 
 impl Ears {
@@ -114,7 +222,7 @@ impl Ears {
             .default_input_device()
             .context("入力デバイスがない")?;
         let supported = device.default_input_config()?;
-        let sample_rate = supported.sample_rate().0;
+        let rate = supported.sample_rate().0;
         let channels = supported.channels() as usize;
         let format = supported.sample_format();
         let config: cpal::StreamConfig = supported.into();
@@ -152,7 +260,7 @@ impl Ears {
         Ok(Self {
             _stream: stream,
             buf,
-            sample_rate,
+            rate,
         })
     }
 
@@ -168,7 +276,7 @@ impl Ears {
         self.buf.lock().unwrap().clear();
 
         // 25ms ごとに直近 200ms の振幅を見て、声が途切れたら打ち切る。
-        let window = (self.sample_rate as usize / 5).max(1);
+        let window = (self.rate as usize / 5).max(1);
         let start = Instant::now();
         let mut heard = false;
         let mut quiet_since: Option<Instant> = None;
@@ -194,7 +302,7 @@ impl Ears {
             return Ok(None);
         }
         let raw = self.buf.lock().unwrap().clone();
-        Ok(Some(resample(&raw, self.sample_rate, WHISPER_SR)))
+        Ok(Some(resample(&raw, self.rate, WHISPER_SR)))
     }
 }
 
@@ -215,4 +323,25 @@ fn resample(src: &[f32], from: u32, to: u32) -> Vec<f32> {
             a + (b - a) * frac
         })
         .collect()
+}
+
+/// 素材が揃っているか起動時に確かめる。
+///
+/// 途中で足りないと気づくと、遊んでいる最中に落ちる。
+/// 足りないものはまとめて出す。
+pub fn check_assets() -> Result<()> {
+    let missing: Vec<&str> = Cue::every()
+        .into_iter()
+        .filter(|&c| Media::open(c).is_err())
+        .map(|c| c.stem())
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "音源が足りない（{} / {}）: {}",
+        missing.len(),
+        Cue::every().len(),
+        missing.join(", ")
+    )
 }
