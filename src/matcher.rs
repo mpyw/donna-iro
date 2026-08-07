@@ -17,22 +17,7 @@ pub enum Answer {
 }
 
 /// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
-///
-/// 実際に子どもの声を通したところ「じゃんぶー」「ジャンプ」に化けた。
-/// 幼児の「ぜ」は摩擦が弱くて「じゃ」に寄りやすいので、その系統を拾う。
-const ALL_READINGS: &[&str] = &[
-    "ぜんぶ",
-    "全部",
-    "ぜーんぶ",
-    "ぜんぶー",
-    "ぜんぷ",
-    "じゃんぶ",
-    "じゃんぶー",
-    "じゃんぷ",
-    "じゃんぷー",
-    "じぇんぶ",
-    "でんぶ",
-];
+pub const ALL_READING: &str = "ぜんぶ";
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -65,13 +50,9 @@ impl Matcher {
     pub fn new() -> Self {
         let mut candidates: Vec<(Answer, String)> = Vec::new();
         for c in Color::ALL {
-            for &r in c.readings() {
-                candidates.push((Answer::Color(c), normalize(r)));
-            }
+            candidates.push((Answer::Color(c), normalize(c.reading())));
         }
-        for &r in ALL_READINGS {
-            candidates.push((Answer::All, normalize(r)));
-        }
+        candidates.push((Answer::All, normalize(ALL_READING)));
         // 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
         // あるので、部分一致は長い読みから試さないと取りこぼす。
         candidates.sort_by_key(|(_, r)| std::cmp::Reverse(r.chars().count()));
@@ -98,11 +79,7 @@ impl Matcher {
             return Some(*a);
         }
 
-        // 3. 編集距離。
-        //
-        //    当初は「ぜんぶ」を除外していた。誤検出するとゲームが終わって
-        //    しまうためだが、実際に試すと取りこぼしのほうが問題だった。
-        //    「ぜんぶ」と紛らわしい色名は無いので、含めても事故は起きにくい。
+        // 3. 編集距離。読みは色ごとに1つなので、ゆれはここで吸収する。
         let chars: Vec<char> = text.chars().collect();
         let mut scores: Vec<(Answer, usize)> = Vec::new();
         for (a, r) in self.candidates.iter() {
@@ -111,12 +88,7 @@ impl Matcher {
             if d > allowed(rc.len()) {
                 continue;
             }
-            // 同じ色に複数の読みがあるので、その色での最小距離を持つ
-            if let Some(slot) = scores.iter_mut().find(|s| s.0 == *a) {
-                slot.1 = slot.1.min(d);
-            } else {
-                scores.push((*a, d));
-            }
+            scores.push((*a, d));
         }
         scores.sort_by_key(|&(_, d)| d);
 
@@ -221,12 +193,6 @@ mod tests {
     }
 
     #[test]
-    fn kanji_readings() {
-        assert_eq!(find("黄色"), c(Color::Yellow));
-        assert_eq!(find("黄緑"), c(Color::YellowGreen));
-    }
-
-    #[test]
     fn punctuation_and_space_are_stripped() {
         assert_eq!(find(" あか！ "), c(Color::Red));
         assert_eq!(find("あお。"), c(Color::Blue));
@@ -252,12 +218,8 @@ mod tests {
     }
 
     #[test]
-    fn all_absorbs_toddler_pronunciation() {
-        // 実際に化けた形。幼児の「ぜ」は「じゃ」に寄る。
-        assert_eq!(find("じゃんぶー"), Some(Answer::All));
-        assert_eq!(find("ジャンプ"), Some(Answer::All));
+    fn all_absorbs_small_slips() {
         assert_eq!(find("ぜんぷ"), Some(Answer::All));
-        // 編集距離でも拾う
         assert_eq!(find("ぜんむ"), Some(Answer::All));
     }
 

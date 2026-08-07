@@ -61,11 +61,8 @@ mod mic {
     /// 「むらさき」が「村先」になった。同音の漢字は無限にあるので、
     /// 読みを足していく方式では追いつかない。出力そのものを寄せる。
     fn vocabulary() -> String {
-        let mut words: Vec<&str> = Color::ALL
-            .iter()
-            .filter_map(|c| c.readings().first().copied())
-            .collect();
-        words.push("ぜんぶ");
+        let mut words: Vec<&str> = Color::ALL.iter().map(|c| c.reading()).collect();
+        words.push(crate::matcher::ALL_READING);
         words.join("、") + "。"
     }
 
