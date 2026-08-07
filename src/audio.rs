@@ -5,7 +5,7 @@
 
 use std::fs::File;
 use std::io::BufReader;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,14 +29,66 @@ impl Player {
         Ok(Self { _stream, handle })
     }
 
-    /// 再生し終わるまで待つ。
-    pub fn play(&self, path: &Path) -> Result<()> {
+    /// 素材名（拡張子なし）を再生し終わるまで待つ。
+    pub fn play(&self, stem: &str) -> Result<()> {
         let sink = rodio::Sink::try_new(&self.handle)?;
-        let file = File::open(path).with_context(|| format!("音源がない: {}", path.display()))?;
+
+        // 埋め込みがあり、かつディレクトリ指定で上書きされていなければ
+        // バイナリの中から鳴らす。
+        #[cfg(feature = "embed")]
+        if asset_dir_override().is_none() {
+            let bytes = embedded(stem)
+                .with_context(|| format!("埋め込まれていない素材: {stem}"))?;
+            sink.append(rodio::Decoder::new(std::io::Cursor::new(bytes))?);
+            sink.sleep_until_end();
+            return Ok(());
+        }
+
+        let path = asset_path(stem);
+        let file = File::open(&path).with_context(|| format!("音源がない: {}", path.display()))?;
         sink.append(rodio::Decoder::new(BufReader::new(file))?);
         sink.sleep_until_end();
         Ok(())
     }
+}
+
+/// 音源のディレクトリ指定。埋め込みビルドでもこれが設定されていれば
+/// ファイルから読む。合成音での確認に使う。
+///
+///     DONNA_IRO_ASSETS=assets/reference cargo run
+fn asset_dir_override() -> Option<String> {
+    std::env::var("DONNA_IRO_ASSETS").ok()
+}
+
+fn asset_path(stem: &str) -> PathBuf {
+    let dir = asset_dir_override().unwrap_or_else(|| "assets".to_string());
+    PathBuf::from(dir).join(format!("{stem}.wav"))
+}
+
+/// 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動かせる。
+///
+///     cargo build --release --features embed
+///
+/// `include_bytes!` はコンパイル時にファイルを要求するので、
+/// 音源が揃うまではこのフィーチャーを有効にできない。
+///
+/// なお whisper のモデルは 141MB あるので埋め込まない。別ファイルのまま
+/// `DONNA_IRO_MODEL` で場所を指す。
+#[cfg(feature = "embed")]
+fn embedded(stem: &str) -> Option<&'static [u8]> {
+    macro_rules! table {
+        ($($name:literal),* $(,)?) => {
+            &[$(($name, include_bytes!(
+                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/", $name, ".wav")
+            ) as &'static [u8])),*]
+        };
+    }
+    const FILES: &[(&str, &[u8])] = table![
+        "intro", "question", "tail", "tail-lead", "bridge", "interlude", "all", "red", "blue",
+        "yellow", "green", "yellowgreen", "white", "black", "pink", "orange", "purple", "brown",
+        "lightblue",
+    ];
+    FILES.iter().find(|(n, _)| *n == stem).map(|(_, b)| *b)
 }
 
 /// 無音とみなす振幅。マイクのノイズフロアより上、囁き声より下を狙う。

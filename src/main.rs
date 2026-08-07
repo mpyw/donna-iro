@@ -12,7 +12,6 @@ mod audio;
 mod display;
 mod listener;
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -127,15 +126,6 @@ impl Color {
     }
 }
 
-/// 音源のディレクトリ。つくよみちゃんの音源が揃うまでは
-/// 確認用の合成音で試せる。
-///
-///     DONNA_IRO_ASSETS=assets/reference cargo run
-fn asset(stem: &str) -> PathBuf {
-    let dir = std::env::var("DONNA_IRO_ASSETS").unwrap_or_else(|_| "assets".to_string());
-    PathBuf::from(dir).join(format!("{stem}.wav"))
-}
-
 /// 子どもの応答。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Answer {
@@ -172,7 +162,7 @@ fn main() -> Result<()> {
 
     // イントロは最初に一度だけ。
     draw_all();
-    player.play(&asset("intro"))?;
+    player.play("intro")?;
 
     // 「ぜんぶ！」と言うまで無限に続く。
     // 何度でも好きな色を答えられるのがこの遊びの本体なので、
@@ -184,7 +174,7 @@ fn main() -> Result<()> {
         // 1. 「どんないろがすき？」を再生（ト長調）
         //    まだ色が決まっていないので全色を出す。
         draw_all();
-        player.play(&asset("question"))?;
+        player.play("question")?;
 
         // 2. 質問の直後だけ聞く。
         //    原曲の m5 3-4拍目に「（あか！）」という合いの手が
@@ -199,13 +189,13 @@ fn main() -> Result<()> {
             // 3a. 「ぜんぶ！」→ 転調してぜんぶの節、そのままエンディング。
             Some(Answer::All) => {
                 draw_all();
-                player.play(&asset("all"))?;
+                player.play("all")?;
                 break;
             }
             // 3b. 色 → その節を再生してループ継続
             Some(Answer::Color(c)) => {
                 draw_one(c);
-                player.play(&asset(c.stem()))?;
+                player.play(c.stem())?;
             }
             // 3c. 何も言わなかった、または聞き取れなかった → ランダムな色。
             //     黙ってはいけない。ここで All を返してはならない。
@@ -213,7 +203,7 @@ fn main() -> Result<()> {
             None => {
                 let c = pick_random();
                 draw_one(c);
-                player.play(&asset(c.stem()))?;
+                player.play(c.stem())?;
             }
         }
 
@@ -239,12 +229,12 @@ fn main() -> Result<()> {
         //    間奏へ向かうときだけ助走つきの tail-lead を使う。
         //    間奏を launch する B5→C6→D6 はアウフタクトで、
         //    この小節に属する。間奏側の頭に置くと拍の位置が変わってしまう。
-        player.play(&asset(if interlude_next { "tail-lead" } else { "tail" }))?;
+        player.play(if interlude_next { "tail-lead" } else { "tail" })?;
 
         if insert {
             // 区切りの間はまた全色に戻す。
             draw_all();
-            player.play(&asset(if interlude_next { "interlude" } else { "bridge" }))?;
+            player.play(if interlude_next { "interlude" } else { "bridge" })?;
         }
     }
 
