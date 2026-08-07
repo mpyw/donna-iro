@@ -46,6 +46,16 @@ cargo build --release
 | `DONNA_IRO_MODEL=<file>` | whisper のモデル（既定 `models/ggml-tiny.bin`） |
 | `DONNA_IRO_THRESHOLD=<f32>` | 発話とみなす RMS。判定のたびに出る「最大」を見て決める |
 
+### macOS の .app
+
+```sh
+tools/bundle-mac.sh     # target/donna-iro.app
+```
+
+Metal を有効にするので認識が CPU より速い。音源とモデルは埋め込む
+（`.app` は CWD が `/` になるため、相対パスでは読めない）。
+`Info.plist` にマイクの用途を書いてあるので、初回に許可を聞かれる。
+
 ### ビルドの切り替え
 
 | フィーチャー | |
@@ -128,6 +138,7 @@ macOS ではウィンドウをメインスレッドに置く必要があり、`c
 | | |
 | --- | --- |
 | `tools/fetch-model.sh` | whisper のモデルを取得 |
+| `tools/bundle-mac.sh` | macOS の `.app` を作る（Metal + 埋め込み） |
 | `tools/split_score.py` | 元譜面から素材ごとの MusicXML を切り出す |
 | `tools/render_reference.py` | MusicXML から確認用の音源を書き出す |
 
