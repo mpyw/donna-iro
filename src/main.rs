@@ -3,8 +3,23 @@
 //!
 //! 設計方針は README を参照。要点は「無反応にしない」こと。
 //! 色が判定できなくても必ず何かを再生する。
+//!
+//!     cargo run                                         マイク
+//!     cargo run --no-default-features                   キーボード（進行の確認用）
+//!     DONNA_IRO_ASSETS=assets/reference cargo run       合成音で試す
+
+mod audio;
+mod display;
+mod listener;
+
+use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
+
+use audio::Player;
+use display::Rgb;
+use listener::{Listener, Mic};
 
 /// 認識対象の色。語彙をこれだけに閉じることで、
 /// 汎用 ASR に頼らずとも判定できるようにする。
@@ -75,27 +90,50 @@ impl Color {
         }
     }
 
-    /// 再生する音源。サブモジュール `assets/` (private) 内のパス。
-    ///
-    /// **各ファイルにはフレーズを最後まで収録すること。**
-    /// 「あかいいろがすき」だけで切れていると歌として成立しない。
-    /// 何を吹き込むかは assets リポジトリの README を参照。
-    fn asset(&self) -> &'static str {
+    /// ターミナルに描く●の色。クレヨン12色の実際の色味に寄せてある。
+    fn rgb(&self) -> Rgb {
         match self {
-            Color::Red => "assets/red.wav",
-            Color::Blue => "assets/blue.wav",
-            Color::Yellow => "assets/yellow.wav",
-            Color::Green => "assets/green.wav",
-            Color::YellowGreen => "assets/yellowgreen.wav",
-            Color::White => "assets/white.wav",
-            Color::Black => "assets/black.wav",
-            Color::Pink => "assets/pink.wav",
-            Color::Orange => "assets/orange.wav",
-            Color::Purple => "assets/purple.wav",
-            Color::Brown => "assets/brown.wav",
-            Color::LightBlue => "assets/lightblue.wav",
+            Color::Red => (230, 0, 18),
+            Color::Blue => (0, 104, 183),
+            Color::Yellow => (255, 241, 0),
+            Color::Green => (0, 153, 68),
+            Color::YellowGreen => (143, 195, 31),
+            Color::White => (245, 245, 245),
+            Color::Black => (35, 24, 21),
+            Color::Pink => (233, 84, 140),
+            Color::Orange => (243, 152, 0),
+            Color::Purple => (146, 7, 131),
+            Color::Brown => (122, 69, 26),
+            Color::LightBlue => (0, 160, 233),
         }
     }
+
+    /// 音源のファイル名（拡張子なし）。
+    fn stem(&self) -> &'static str {
+        match self {
+            Color::Red => "red",
+            Color::Blue => "blue",
+            Color::Yellow => "yellow",
+            Color::Green => "green",
+            Color::YellowGreen => "yellowgreen",
+            Color::White => "white",
+            Color::Black => "black",
+            Color::Pink => "pink",
+            Color::Orange => "orange",
+            Color::Purple => "purple",
+            Color::Brown => "brown",
+            Color::LightBlue => "lightblue",
+        }
+    }
+}
+
+/// 音源のディレクトリ。つくよみちゃんの音源が揃うまでは
+/// 確認用の合成音で試せる。
+///
+///     DONNA_IRO_ASSETS=assets/reference cargo run
+fn asset(stem: &str) -> PathBuf {
+    let dir = std::env::var("DONNA_IRO_ASSETS").unwrap_or_else(|_| "assets".to_string());
+    PathBuf::from(dir).join(format!("{stem}.wav"))
 }
 
 /// 子どもの応答。
@@ -107,9 +145,34 @@ enum Answer {
     All,
 }
 
+/// 応答を待つ最大時間。2歳児は考えてから言うので短すぎると取りこぼす。
+const LISTEN_MAX: Duration = Duration::from_secs(5);
+
+/// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
+const INSERT_EVERY: u32 = 3;
+
 fn main() -> Result<()> {
+    // 色味の確認用。音源もマイクも要らない。
+    //     cargo run --no-default-features -- --palette
+    if std::env::args().any(|a| a == "--palette") {
+        draw_all();
+        for c in Color::ALL {
+            println!("{:?}", c);
+            draw_one(c);
+        }
+        return Ok(());
+    }
+
+    let player = Player::new()?;
+    let mut ears = if cfg!(feature = "whisper") {
+        Listener::Mic(Mic::new()?)
+    } else {
+        Listener::Keyboard
+    };
+
     // イントロは最初に一度だけ。
-    play("assets/intro.wav")?;
+    draw_all();
+    player.play(&asset("intro"))?;
 
     // 「ぜんぶ！」と言うまで無限に続く。
     // 何度でも好きな色を答えられるのがこの遊びの本体なので、
@@ -119,32 +182,39 @@ fn main() -> Result<()> {
         round += 1;
 
         // 1. 「どんないろがすき？」を再生（ト長調）
-        play("assets/question.wav")?;
+        //    まだ色が決まっていないので全色を出す。
+        draw_all();
+        player.play(&asset("question"))?;
 
-        // 2. 質問の直後だけ録音する。
+        // 2. 質問の直後だけ聞く。
         //    原曲の m5 3-4拍目に「（あか！）」という合いの手が
         //    書かれており、そこがそのまま応答の枠になっている。
         //
         //    常時聞いていると自分が流した音を拾って誤爆するため、
         //    エコーキャンセルではなくウィンドウ制御で回避する。
-        //
-        //    2歳児は考えてから言うので、最大5秒待つ。
-        //    ただし毎回5秒待ち切ると間延びして歌にならないので、
-        //    声が途切れた時点で早く切り上げること（LISTEN_MAX は上限）。
-        let audio = listen(LISTEN_MAX)?;
+        let heard = ears.hear(LISTEN_MAX)?;
+        let answer = heard.as_deref().and_then(match_answer);
 
-        match recognize(&audio) {
+        match answer {
             // 3a. 「ぜんぶ！」→ 転調してぜんぶの節、そのままエンディング。
             Some(Answer::All) => {
-                play("assets/all.wav")?;
+                draw_all();
+                player.play(&asset("all"))?;
                 break;
             }
             // 3b. 色 → その節を再生してループ継続
-            Some(Answer::Color(c)) => play(c.asset())?,
+            Some(Answer::Color(c)) => {
+                draw_one(c);
+                player.play(&asset(c.stem()))?;
+            }
             // 3c. 何も言わなかった、または聞き取れなかった → ランダムな色。
             //     黙ってはいけない。ここで All を返してはならない。
             //     事故で終わってしまう。
-            None => play(pick_random().asset())?,
+            None => {
+                let c = pick_random();
+                draw_one(c);
+                player.play(&asset(c.stem()))?;
+            }
         }
 
         // 4. 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
@@ -169,36 +239,33 @@ fn main() -> Result<()> {
         //    間奏へ向かうときだけ助走つきの tail-lead を使う。
         //    間奏を launch する B5→C6→D6 はアウフタクトで、
         //    この小節に属する。間奏側の頭に置くと拍の位置が変わってしまう。
-        play(if interlude_next {
-            "assets/tail-lead.wav"
-        } else {
-            "assets/tail.wav"
-        })?;
+        player.play(&asset(if interlude_next { "tail-lead" } else { "tail" }))?;
 
         if insert {
-            play(if interlude_next {
-                "assets/interlude.wav"
-            } else {
-                "assets/bridge.wav"
-            })?;
+            // 区切りの間はまた全色に戻す。
+            draw_all();
+            player.play(&asset(if interlude_next { "interlude" } else { "bridge" }))?;
         }
     }
 
     Ok(())
 }
 
-/// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
-const INSERT_EVERY: u32 = 3;
-
-/// 音声から応答を判定する。確信が持てなければ None。
-fn recognize(audio: &[f32]) -> Option<Answer> {
-    match_answer(&transcribe(audio)?)
+/// 全色を並べて描く。質問・区切り・「ぜんぶ」のとき。
+fn draw_all() {
+    let rgbs: Vec<Rgb> = Color::ALL.iter().map(|c| c.rgb()).collect();
+    print!("{}", display::all(&rgbs));
 }
 
-/// TODO: whisper-rs で文字起こしする。何も喋っていなければ None。
-///       精度が出なければ、その子の声で学習した専用分類器に差し替える。
-fn transcribe(_audio: &[f32]) -> Option<String> {
-    todo!("whisper-rs による文字起こし")
+/// 1色を大きく描く。その色のフレーズを歌っている間。
+fn draw_one(c: Color) {
+    print!("{}", display::one(c.rgb()));
+}
+
+/// 判定できなかったときのフォールバック。
+fn pick_random() -> Color {
+    use rand::seq::SliceRandom;
+    *Color::ALL.choose(&mut rand::thread_rng()).unwrap()
 }
 
 /// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
@@ -239,8 +306,24 @@ fn normalize(s: &str) -> String {
 fn is_ignorable(c: char) -> bool {
     matches!(
         c,
-        '、' | '。' | '，' | '．' | ',' | '.' | '!' | '?' | '！' | '？'
-            | '「' | '」' | '（' | '）' | '(' | ')' | '・' | '〜' | '~'
+        '、' | '。'
+            | '，'
+            | '．'
+            | ','
+            | '.'
+            | '!'
+            | '?'
+            | '！'
+            | '？'
+            | '「'
+            | '」'
+            | '（'
+            | '）'
+            | '('
+            | ')'
+            | '・'
+            | '〜'
+            | '~'
     )
 }
 
@@ -328,33 +411,6 @@ fn match_answer(raw: &str) -> Option<Answer> {
     Some(best)
 }
 
-/// 判定できなかったときのフォールバック。
-fn pick_random() -> Color {
-    use rand::seq::SliceRandom;
-    *Color::ALL.choose(&mut rand::thread_rng()).unwrap()
-}
-
-/// 応答を待つ最大時間。2歳児は考えてから言うので短すぎると取りこぼす。
-const LISTEN_MAX: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// 応答を待って録音する。返り値は 16kHz モノラルの f32 PCM（whisper の入力形式）。
-///
-/// `max` は**上限**であって固定長ではない。声が途切れたら早く返すこと。
-/// 毎回5秒待ち切ると歌の流れが死ぬ。
-/// 何も言わなければ `max` まで待って、無音のまま返す（呼び出し側で
-/// ランダムな色にフォールバックする）。
-///
-/// TODO: cpal で録音。打ち切り判定は素朴な音量しきい値でまず十分。
-///       誤爆するようなら VAD（webrtc-vad など）を検討する。
-fn listen(_max: std::time::Duration) -> Result<Vec<f32>> {
-    todo!("cpal による録音と無音打ち切り")
-}
-
-/// TODO: rodio で再生する。再生完了までブロックする。
-fn play(_path: &str) -> Result<()> {
-    todo!("rodio による再生")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +487,14 @@ mod tests {
         let b: Vec<char> = "あお".chars().collect();
         assert_eq!(levenshtein(&a, &a), 0);
         assert_eq!(levenshtein(&a, &b), 1);
+    }
+
+    #[test]
+    fn every_asset_stem_is_unique() {
+        let mut stems: Vec<&str> = Color::ALL.iter().map(|c| c.stem()).collect();
+        stems.sort_unstable();
+        let n = stems.len();
+        stems.dedup();
+        assert_eq!(stems.len(), n);
     }
 }
