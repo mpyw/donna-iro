@@ -5,8 +5,8 @@
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -184,8 +184,39 @@ fn asset_dir_override() -> Option<String> {
 }
 
 fn asset_path(stem: &str) -> PathBuf {
-    let dir = asset_dir_override().unwrap_or_else(|| "assets".to_string());
-    PathBuf::from(dir).join(format!("{stem}.wav"))
+    asset_dir().join(format!("{stem}.wav"))
+}
+
+/// 使う音源ディレクトリ。一度決めたら変えない。
+///
+/// 明示指定がなければ、本番音源が揃っているかを見て自動で選ぶ。
+/// つくよみちゃんの音源を `assets/` に置いた時点で、何もしなくても
+/// そちらに切り替わる。合成音を既定にベタ書きすると、本番音源を
+/// 置いたあとも合成音が鳴り続けることになる。
+fn asset_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Some(dir) = asset_dir_override() {
+            return PathBuf::from(dir);
+        }
+        let main = PathBuf::from("assets");
+        if complete(&main) {
+            return main;
+        }
+        let reference = main.join("reference");
+        if complete(&reference) {
+            eprintln!("  本番音源が無いので合成音を使う: {}", reference.display());
+            return reference;
+        }
+        // どちらも欠けている。check_assets に本番側のパスで報告させる。
+        main
+    })
+}
+
+fn complete(dir: &Path) -> bool {
+    Cue::every()
+        .iter()
+        .all(|c| dir.join(format!("{}.wav", c.stem())).exists())
 }
 
 /// 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動かせる。

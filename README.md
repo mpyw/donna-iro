@@ -28,11 +28,13 @@ tools/fetch-model.sh        # whisper のモデルを取る（tiny・74MB）
 cargo build --release
 ```
 
-音源が揃うまでは、確認用の合成音で動かせる。
-
 ```sh
-DONNA_IRO_ASSETS=assets/reference ./target/release/donna-iro
+./target/release/donna-iro
 ```
+
+つくよみちゃんの音源が `assets/` に揃うまでは、確認用の合成音
+（`assets/reference/`）に自動で落ちる。音源を置いた時点で、何もしなくても
+そちらに切り替わる。
 
 ### 実行時の切り替え
 
