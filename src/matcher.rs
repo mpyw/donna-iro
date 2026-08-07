@@ -1,9 +1,13 @@
 //! 認識結果の文字列から応答を判定する。
 //!
+//! まずひらがな以外で区切り、**先頭の区間から順に**判定する。
+//! 各区間では次を順に試す。
+//!
 //! 1. 完全一致
 //! 2. 部分一致（長い読みから順に）
 //! 3. 編集距離が最小のもの
-//! 4. どれも該当しなければ `None`。呼び出し側でランダムな色に倒す
+//!
+//! どの区間も該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
 use crate::color::Color;
 
@@ -60,13 +64,19 @@ impl Matcher {
     }
 
     pub fn find(&self, raw: &str) -> Option<Answer> {
-        let text = strip_prompt(&normalize(raw));
-        if text.is_empty() {
-            return None;
-        }
+        // 先頭の区間から順に見る。最初に言った色を優先するため。
+        segments(&normalize(raw))
+            .into_iter()
+            .filter_map(|seg| {
+                let text = strip_prompt(&seg);
+                (!text.is_empty()).then(|| self.find_one(&text))?
+            })
+            .next()
+    }
 
+    fn find_one(&self, text: &str) -> Option<Answer> {
         // 1. 完全一致
-        if let Some((a, _)) = self.candidates.iter().find(|(_, r)| *r == text) {
+        if let Some((a, _)) = self.candidates.iter().find(|(_, r)| r == text) {
             return Some(*a);
         }
 
@@ -102,13 +112,34 @@ impl Matcher {
     }
 }
 
-/// カタカナをひらがなに寄せ、空白と記号を落とす。
+/// ひらがな以外で区切る。
+///
+/// whisper が不明瞭な音を受け取ると、`initial_prompt` に渡した語彙を
+/// そのまま並べて返すことがある。実際に「あお、きいろ、みどり、しろ、みど」
+/// が出た。区切らずに繋げると、部分一致が長い読みから探すせいで
+/// 途中の「きいろ」を拾ってしまう。
+///
+/// 区切って先頭から見れば、最初に言われた色を優先できる。
+fn segments(s: &str) -> Vec<String> {
+    s.split(|c: char| !is_kana(c))
+        .filter(|seg| !seg.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn is_kana(c: char) -> bool {
+    let u = c as u32;
+    (0x3041..=0x3096).contains(&u) || c == 'ー'
+}
+
+/// カタカナをひらがなに寄せ、空白を落とす。
 ///
 /// 認識結果と読みの両方を通すので、読みの側にカタカナ表記を並べる
 /// 必要がない。長音符「ー」はカタカナ領域の外なのでそのまま残る。
+/// 句読点は落とさない。`segments` が区切りとして使う。
 fn normalize(s: &str) -> String {
     s.chars()
-        .filter(|c| !c.is_whitespace() && !is_ignorable(*c))
+        .filter(|c| !c.is_whitespace())
         .map(|c| {
             let u = c as u32;
             if (0x30A1..=0x30F6).contains(&u) {
@@ -118,30 +149,6 @@ fn normalize(s: &str) -> String {
             }
         })
         .collect()
-}
-
-fn is_ignorable(c: char) -> bool {
-    matches!(
-        c,
-        '、' | '。'
-            | '，'
-            | '．'
-            | ','
-            | '.'
-            | '!'
-            | '?'
-            | '！'
-            | '？'
-            | '「'
-            | '」'
-            | '（'
-            | '）'
-            | '('
-            | ')'
-            | '・'
-            | '〜'
-            | '~'
-    )
 }
 
 fn strip_prompt(s: &str) -> String {
@@ -232,6 +239,19 @@ mod tests {
     #[test]
     fn unrelated_speech_is_rejected() {
         assert_eq!(find("おかあさん"), None);
+    }
+
+    #[test]
+    fn prompt_echo_takes_the_first_color() {
+        // whisper が initial_prompt の語彙を吐き返したときに実際に出た形。
+        // 繋げて探すと途中の「きいろ」を拾ってしまう。
+        assert_eq!(find("あお、きいろ、みどり、しろ、みど"), c(Color::Blue));
+    }
+
+    #[test]
+    fn earlier_segment_wins() {
+        assert_eq!(find("あか。あお"), c(Color::Red));
+        assert_eq!(find("むらさき / みどり"), c(Color::Purple));
     }
 
     #[test]
