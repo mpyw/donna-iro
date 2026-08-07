@@ -11,8 +11,7 @@ use anyhow::Result;
 ///
 /// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
 /// （しろ・きいろ・きみどり・みどり・みずいろ・あお・むらさき・
-/// ももいろ・あか・だいだい・ちゃいろ・くろ）を基準に選んである。
-/// そこに こん・はいいろ と、子どもが好きな きんいろ・ぎんいろ を足した16色。
+/// ももいろ・あか・だいだい・ちゃいろ・くろ）に揃えてある。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Color {
     Red,
@@ -27,14 +26,10 @@ enum Color {
     Purple,
     Brown,
     LightBlue,
-    Navy,
-    Gray,
-    Gold,
-    Silver,
 }
 
 impl Color {
-    const ALL: [Color; 16] = [
+    const ALL: [Color; 12] = [
         Color::Red,
         Color::Blue,
         Color::Yellow,
@@ -47,10 +42,6 @@ impl Color {
         Color::Purple,
         Color::Brown,
         Color::LightBlue,
-        Color::Navy,
-        Color::Gray,
-        Color::Gold,
-        Color::Silver,
     ];
 
     /// 認識結果の文字列にマッチさせる読み。表記ゆれと幼児の発音ゆれを吸収する。
@@ -59,7 +50,7 @@ impl Color {
     /// 含まれる組み合わせがあるため、素朴に前から探すと誤判定する。
     ///
     /// - 「きみどり」⊃「みどり」
-    /// - 「きんいろ」「ぎんいろ」「みずいろ」「ちゃいろ」「はいいろ」⊃「いろ」
+    /// - 「みずいろ」「ちゃいろ」「きいろ」⊃「いろ」
     ///
     /// 「ももいろ」はピンク、「だいだい」はオレンジの読みとして扱う。
     /// クレヨンの表記と子どもが言う語が違うため、両方拾えるようにしてある。
@@ -77,10 +68,6 @@ impl Color {
             Color::Purple => &["むらさき", "ムラサキ", "紫", "むあさき"],
             Color::Brown => &["ちゃいろ", "チャイロ", "茶色"],
             Color::LightBlue => &["みずいろ", "ミズイロ", "水色"],
-            Color::Navy => &["こん", "コン", "紺", "こんいろ", "紺色"],
-            Color::Gray => &["はいいろ", "ハイイロ", "灰色", "ぐれー", "グレー"],
-            Color::Gold => &["きんいろ", "キンイロ", "金色", "きん", "ゴールド"],
-            Color::Silver => &["ぎんいろ", "ギンイロ", "銀色", "ぎん", "シルバー"],
         }
     }
 
@@ -103,10 +90,6 @@ impl Color {
             Color::Purple => "assets/purple.wav",
             Color::Brown => "assets/brown.wav",
             Color::LightBlue => "assets/lightblue.wav",
-            Color::Navy => "assets/navy.wav",
-            Color::Gray => "assets/gray.wav",
-            Color::Gold => "assets/gold.wav",
-            Color::Silver => "assets/silver.wav",
         }
     }
 }
