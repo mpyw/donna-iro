@@ -85,10 +85,15 @@ mod whisper_impl {
             params.set_print_timestamps(false);
             state.full(params, pcm).ok()?;
 
-            let n = state.full_n_segments().ok()?;
+            // 0.16 では full_n_segments() は i32 を直接返し、
+            // テキストは get_segment() で取り出す。
             let mut text = String::new();
-            for i in 0..n {
-                text.push_str(&state.full_get_segment_text(i).ok()?);
+            for i in 0..state.full_n_segments() {
+                if let Some(seg) = state.get_segment(i) {
+                    if let Ok(s) = seg.to_str_lossy() {
+                        text.push_str(&s);
+                    }
+                }
             }
             Some(text)
         }
