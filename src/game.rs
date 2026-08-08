@@ -23,34 +23,37 @@ use anyhow::Result;
 
 use crate::audio::Player;
 use crate::color::Color;
+use crate::config::Config;
 use crate::cue::Cue;
 use crate::listener::Listener;
 use crate::matcher::{Answer, Matcher};
 use crate::screen::{Frame, Screen};
-
-/// 応答を待つ最大時間。2歳児は考えてから言うので短すぎると取りこぼす。
-const LISTEN_MAX: Duration = Duration::from_secs(5);
-
-/// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
-const INSERT_EVERY: u32 = 3;
-
-/// フィナーレで色を差し替える間隔。
-const FLASH: Duration = Duration::from_millis(500);
 
 pub struct Game {
     player: Player,
     screen: Box<dyn Screen>,
     matcher: Matcher,
     ears: Box<dyn Listener>,
+    listen_max: Duration,
+    insert_every: u32,
+    flash: Duration,
 }
 
 impl Game {
-    pub fn new(player: Player, ears: Box<dyn Listener>, screen: Box<dyn Screen>) -> Self {
+    pub fn new(
+        player: Player,
+        ears: Box<dyn Listener>,
+        screen: Box<dyn Screen>,
+        cfg: &Config,
+    ) -> Self {
         Self {
             player,
             screen,
-            matcher: Matcher::new(),
+            matcher: Matcher::new(cfg.recognize.head_segments),
             ears,
+            listen_max: cfg.listen.max(),
+            insert_every: cfg.game.insert_every,
+            flash: cfg.game.flash(),
         }
     }
 
@@ -71,7 +74,7 @@ impl Game {
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
             self.player.play_until_quiet(Cue::Question)?;
 
-            let heard = self.ears.hear(LISTEN_MAX)?;
+            let heard = self.ears.hear(self.listen_max)?;
             let answer = heard.as_deref().and_then(|t| self.matcher.find(t));
 
             if answer == Some(Answer::All) {
@@ -90,8 +93,8 @@ impl Game {
             // 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
             // 挟むものはブリッジと間奏を交互に入れ替える。同じ区切りが
             // 毎回続くとそれ自体が単調になるため。
-            let insert = round.is_multiple_of(INSERT_EVERY);
-            let interlude_next = insert && (round / INSERT_EVERY).is_multiple_of(2);
+            let insert = round.is_multiple_of(self.insert_every);
+            let interlude_next = insert && (round / self.insert_every).is_multiple_of(2);
 
             // 節の最終小節。間奏を launch する助走はアウフタクトで
             // この小節に属するので、間奏へ向かうときだけ差し替える。
@@ -125,7 +128,7 @@ impl Game {
             order = shuffle(&order);
             self.screen.show(Frame::Palette(order));
             let left = end.saturating_duration_since(Instant::now());
-            std::thread::sleep(FLASH.min(left));
+            std::thread::sleep(self.flash.min(left));
         }
         self.screen.show(Frame::palette());
         Ok(())

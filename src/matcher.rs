@@ -36,13 +36,6 @@ pub const ALL_READING: &str = "ぜんぶ";
 /// whisper は漢字を返すことがある。実際に「全部」が出た。
 const ALL_KANJI: &str = "全部";
 
-/// 先頭から信用する区間の数。
-///
-/// tiny は言っていない語を後ろに継ぎ足すので、全部を見ると
-/// 混ざったものを拾ってしまう。かといって1区間に絞ると、
-/// 「えーと、あか」のような言い淀みや、語が割れた場合を落とす。
-const HEAD: usize = 2;
-
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
 /// 「どんないろがすき」には「いろ」が含まれるので、残したまま判定すると
@@ -89,16 +82,12 @@ pub struct Matcher {
     candidates: Vec<(Answer, String)>,
     /// 同じものの骨格。編集距離用。
     skeletons: Vec<(Answer, Vec<char>)>,
-}
-
-impl Default for Matcher {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// 先頭から信用する区間の数。tiny は言っていない語を後ろに継ぎ足す。
+    head: usize,
 }
 
 impl Matcher {
-    pub fn new() -> Self {
+    pub fn new(head: usize) -> Self {
         let mut candidates: Vec<(Answer, String)> = Vec::new();
         for c in Color::ALL {
             candidates.push((Answer::Color(c), normalize(c.reading())));
@@ -117,6 +106,7 @@ impl Matcher {
         Self {
             candidates,
             skeletons,
+            head: head.max(1),
         }
     }
 
@@ -128,7 +118,7 @@ impl Matcher {
             .collect();
         // 同じ語の繰り返しは畳む。tiny が出力を繰り返すことがある。
         parts.dedup();
-        parts.truncate(HEAD);
+        parts.truncate(self.head);
 
         // 先頭の区間から順に。単独で当たらなければ次と繋げて試す。
         (0..parts.len()).find_map(|i| {
@@ -378,7 +368,7 @@ mod tests {
     use super::*;
 
     fn find(s: &str) -> Option<Answer> {
-        Matcher::new().find(s)
+        Matcher::new(2).find(s)
     }
     fn c(x: Color) -> Option<Answer> {
         Some(Answer::Color(x))

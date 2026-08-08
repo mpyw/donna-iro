@@ -43,6 +43,7 @@ mod mic {
     use super::Listener;
     use crate::audio::{Ears, WHISPER_SR};
     use crate::color::Color;
+    use crate::config::Config;
 
     /// モデルも状態も起動時に一度だけ作る。
     ///
@@ -53,6 +54,7 @@ mod mic {
         ears: Ears,
         /// whisper に「こういう言葉が来る」と教える文。
         prompt: String,
+        audio_ctx: i32,
     }
 
     /// 認識対象の語をひらがなで並べた文を作る。
@@ -67,12 +69,12 @@ mod mic {
     }
 
     impl Mic {
-        pub fn new(ears: Ears) -> Result<Self> {
+        pub fn new(ears: Ears, cfg: &Config) -> Result<Self> {
             // whisper.cpp が stderr に吐く初期化ログを log クレートに流す。
             // ロガーを入れていないので、そのまま捨てられる。
             whisper_rs::install_logging_hooks();
 
-            let ctx = load_model()?;
+            let ctx = load_model(cfg)?;
             let state = ctx.create_state()?;
             let prompt = vocabulary();
             eprintln!("  語彙: {prompt}");
@@ -80,6 +82,7 @@ mod mic {
                 state,
                 ears,
                 prompt,
+                audio_ctx: cfg.recognize.audio_ctx.clamp(128, 1500),
             })
         }
 
@@ -105,7 +108,7 @@ mod mic {
             // whisper は入力を必ず30秒に詰めてからエンコードする。
             // audio_ctx を実際の長さに見合う値まで下げると、
             // エンコーダの計算量がそのぶん減る。ここが一番効く。
-            params.set_audio_ctx(audio_ctx(pcm.len()));
+            params.set_audio_ctx(self.audio_ctx);
 
             // 一言しか来ないので、区切らず・文脈も持たない。
             params.set_single_segment(true);
@@ -138,7 +141,7 @@ mod mic {
                 "  認識 {:.2}秒（音声 {:.1}秒 / audio_ctx {}）→ {:?}",
                 started.elapsed().as_secs_f32(),
                 pcm.len() as f32 / WHISPER_SR as f32,
-                audio_ctx(pcm.len()),
+                self.audio_ctx,
                 text.trim()
             );
             Some(text)
@@ -162,9 +165,9 @@ mod mic {
     ///
     /// `DONNA_IRO_MODEL` を指定すればファイルから読む。埋め込みビルドでも
     /// これが優先されるので、base を試したいときに使える。
-    fn load_model() -> Result<WhisperContext> {
-        if let Ok(path) = std::env::var("DONNA_IRO_MODEL") {
-            return WhisperContext::new_with_params(&path, WhisperContextParameters::default())
+    fn load_model(cfg: &Config) -> Result<WhisperContext> {
+        if let Some(path) = cfg.paths.model() {
+            return WhisperContext::new_with_params(path, WhisperContextParameters::default())
                 .with_context(|| format!("モデルを読めない: {path}"));
         }
 
@@ -193,24 +196,5 @@ mod mic {
         std::thread::available_parallelism()
             .map(|n| n.get() as i32)
             .unwrap_or(4)
-    }
-
-    /// エンコーダの文脈長。whisper は入力を必ず30秒（=1500）に詰めてから
-    /// エンコードするので、実際の音の長さに見合う値まで下げれば速くなる。
-    ///
-    /// **切り詰めない。** 一時期 512 まで下げていたが、子どもの声で
-    /// 精度が目に見えて落ちた。モデルを base に上げるより、tiny のまま
-    /// ここを戻すほうが効いた。エンコーダが小さいぶん速度も base より速い。
-    ///
-    /// ラズパイで遅ければ `DONNA_IRO_AUDIO_CTX` で下げられる。
-    /// 精度と速度のつまみはここ。
-    const FULL: i32 = 1500;
-
-    fn audio_ctx(_samples: usize) -> i32 {
-        std::env::var("DONNA_IRO_AUDIO_CTX")
-            .ok()
-            .and_then(|v| v.parse::<i32>().ok())
-            .map(|v| v.clamp(128, FULL))
-            .unwrap_or(FULL)
     }
 }

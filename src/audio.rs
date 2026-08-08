@@ -13,6 +13,7 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::Source;
 
+use crate::config::{Config, Listen};
 use crate::cue::Cue;
 
 /// whisper が受け取るサンプリングレート。
@@ -175,12 +176,17 @@ impl Seek for Media {
     }
 }
 
-/// 音源のディレクトリ指定。埋め込みビルドでもこれが設定されていれば
-/// ファイルから読む。合成音での確認に使う。
-///
-///     DONNA_IRO_ASSETS=assets/reference cargo run
-fn asset_dir_override() -> Option<String> {
-    std::env::var("DONNA_IRO_ASSETS").ok()
+/// 音源のディレクトリ指定。設定で明示されていればそれを使う。
+/// 埋め込みビルドでも、指定があればファイルから読む。
+static OVERRIDE: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+fn asset_dir_override() -> Option<PathBuf> {
+    OVERRIDE.get().cloned().flatten()
+}
+
+/// 起動時に一度だけ呼ぶ。
+pub fn configure(cfg: &Config) {
+    let _ = OVERRIDE.set(cfg.paths.assets());
 }
 
 fn asset_path(stem: &str) -> PathBuf {
@@ -197,7 +203,7 @@ fn asset_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
         if let Some(dir) = asset_dir_override() {
-            return PathBuf::from(dir);
+            return dir;
         }
         let main = PathBuf::from("assets");
         if complete(&main) {
@@ -263,37 +269,12 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
 
 // ---------------------------------------------------------------- 録音
 
-/// 声が途切れてから打ち切るまでの猶予。
-/// 短くするほど反応が速くなるが、言い淀みで切れやすくなる。
-const HANGOVER: Duration = Duration::from_millis(350);
-
-/// 起動時に環境ノイズを測る回数。刻んで中央値を取る。
-/// 400ms を丸ごと平均すると、その瞬間の物音ひとつで跳ね上がる。
-const FLOOR_CHUNKS: usize = 8;
-// --- 発話とみなす基準 ---
-//
-// **拾いすぎのコストはほぼゼロ。** 誤検出しても whisper がノイズを
-// 文字起こしして判定が None になり、ランダムな色が鳴る。何も聞こえ
-// なかった場合と結果が同じで、損するのは認識の 0.2秒だけ。
-//
-// 逆に取りこぼすと、子どもが答えたのに無視されることになる。
-// 明らかに非対称なので、迷ったら拾う側に倒す。
-
-/// 環境ノイズの何倍を発話とみなすか。
-const SPEECH_RATIO: f32 = 2.0;
-/// しきい値の下限。
-const SPEECH_FLOOR: f32 = 0.005;
-/// しきい値の上限。環境ノイズを高く見積もったまま固まると、
-/// いくら叫んでも届かなくなる。被害をここで止める。
-const SPEECH_CEIL: f32 = 0.015;
-/// 窓を開けた直後、スピーカーの残響で誤発火しないよう待つ。
-/// **録音自体は続ける**ので、この間に話し始めても声は残る。
-const GUARD: Duration = Duration::from_millis(200);
-/// これだけ続けて初めて「聞こえた」とみなす。単発のノイズを弾く。
-/// 短くするほど拾いやすくなる。誤検出は無害なので短めに取る。
-const MIN_SPEECH: Duration = Duration::from_millis(75);
 /// 監視の刻み。
 const TICK: Duration = Duration::from_millis(25);
+
+/// 起動時に環境ノイズを測る回数。刻んで中央値を取る。
+/// 連続した区間の平均だと、その瞬間の物音ひとつで跳ね上がる。
+const FLOOR_CHUNKS: usize = 8;
 
 /// 入力ストリームを開きっぱなしにして持ち回す。
 ///
@@ -306,12 +287,11 @@ pub struct Ears {
     rate: u32,
     /// 環境ノイズの推定値。毎回の観測で更新する。
     floor: f32,
-    /// 利用者が明示指定したしきい値。あればこれで固定。
-    fixed: Option<f32>,
+    cfg: Listen,
 }
 
 impl Ears {
-    pub fn new() -> Result<Self> {
+    pub fn new(cfg: &Config) -> Result<Self> {
         let device = cpal::default_host()
             .default_input_device()
             .context("入力デバイスがない")?;
@@ -364,23 +344,22 @@ impl Ears {
         }
         levels.sort_by(|a, b| a.total_cmp(b));
         let floor = levels[FLOOR_CHUNKS / 2];
-        let fixed = std::env::var("DONNA_IRO_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse::<f32>().ok());
         let ears = Self {
             _stream: stream,
             buf,
             rate,
             floor,
-            fixed,
+            cfg: cfg.listen.clone(),
         };
         eprintln!("  環境ノイズ {floor:.4} → しきい値 {:.4}", ears.threshold());
         Ok(ears)
     }
 
     fn threshold(&self) -> f32 {
-        self.fixed
-            .unwrap_or_else(|| (self.floor * SPEECH_RATIO).clamp(SPEECH_FLOOR, SPEECH_CEIL))
+        if self.cfg.threshold > 0.0 {
+            return self.cfg.threshold;
+        }
+        (self.floor * self.cfg.speech_ratio).clamp(self.cfg.speech_floor, self.cfg.speech_ceil)
     }
 
     /// 環境ノイズの推定を観測で更新する。
@@ -429,7 +408,7 @@ impl Ears {
 
             // 窓を開けた直後はスピーカーの残響が残っている。
             // ここで「聞こえた」と判定すると即座に打ち切ってしまう。
-            if start.elapsed() < GUARD {
+            if start.elapsed() < self.cfg.guard() {
                 continue;
             }
             loudest = loudest.max(level);
@@ -438,7 +417,7 @@ impl Ears {
             if level > threshold {
                 // 単発のノイズで発火しないよう、続いた時間を見る。
                 voiced += TICK;
-                if voiced >= MIN_SPEECH {
+                if voiced >= self.cfg.min_speech() {
                     heard = true;
                 }
                 quiet_since = None;
@@ -446,7 +425,7 @@ impl Ears {
                 voiced = Duration::ZERO;
                 if heard {
                     let since = *quiet_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= HANGOVER {
+                    if since.elapsed() >= self.cfg.hangover() {
                         break;
                     }
                 }
@@ -503,7 +482,8 @@ fn resample(src: &[f32], from: u32, to: u32) -> Vec<f32> {
 ///
 /// 途中で足りないと気づくと、遊んでいる最中に落ちる。
 /// 足りないものはまとめて出す。
-pub fn check_assets() -> Result<()> {
+pub fn check_assets(cfg: &Config) -> Result<()> {
+    configure(cfg);
     let missing: Vec<&str> = Cue::every()
         .into_iter()
         .filter(|&c| Media::open(c).is_err())
