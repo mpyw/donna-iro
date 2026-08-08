@@ -7,7 +7,10 @@
 //! 3. 環境変数
 //!
 //! **環境変数名はキーの位置から機械的に決まる。**
-//! `listen.max_seconds` なら `DONNA_IRO_LISTEN_MAX_SECONDS`。
+//! 節とキーの区切りは `__`（2本）。`listen.max_seconds` なら
+//! `DONNA_IRO_LISTEN__MAX_SECONDS`。キー名自体に `_` が入るので、
+//! 節の区切りは別の記号にする必要がある。
+//!
 //! 同梱の `config.toml` に全項目と対応する環境変数名が書いてあるので、
 //! どこをいじれるかはそのファイルを見れば分かる。
 
@@ -15,9 +18,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use figment::providers::{Env, Format, Serialized, Toml};
+use figment::Figment;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub paths: Paths,
@@ -26,7 +31,7 @@ pub struct Config {
     pub game: Game,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Paths {
     /// 音源のディレクトリ。空なら自動（`assets/` が揃っていればそれ、
@@ -37,7 +42,7 @@ pub struct Paths {
     pub model: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Listen {
     /// 応答を待つ上限（秒）。
@@ -58,7 +63,7 @@ pub struct Listen {
     pub threshold: f32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Recognize {
     /// エンコーダの文脈長。下げると速く、精度は落ちる。1500 で切り詰めなし。
@@ -67,7 +72,7 @@ pub struct Recognize {
     pub head_segments: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Game {
     /// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
@@ -139,73 +144,38 @@ impl Paths {
     }
 }
 
+/// 環境変数の接頭辞。
+const PREFIX: &str = "DONNA_IRO_";
+/// 節とキーの区切り。キー名に `_` が入るので2本にする。
+const NEST: &str = "__";
+
 impl Config {
-    /// 読み込んで環境変数で上書きする。
+    /// 既定値 → `config.toml` → 環境変数 の順に重ねる。
     pub fn load(explicit: Option<&Path>) -> Result<Self> {
         let path = explicit.map(Path::to_path_buf).or_else(|| {
             let d = PathBuf::from("config.toml");
             d.exists().then_some(d)
         });
 
-        let mut cfg = match &path {
-            Some(p) => {
-                let text = std::fs::read_to_string(p)
-                    .with_context(|| format!("設定を読めない: {}", p.display()))?;
-                toml::from_str(&text)
-                    .with_context(|| format!("設定の書式が違う: {}", p.display()))?
-            }
-            None => Config::default(),
-        };
-        let overridden = cfg.apply_env()?;
+        let mut figment = Figment::from(Serialized::defaults(Config::default()));
+        if let Some(p) = &path {
+            figment = figment.merge(Toml::file(p));
+        }
+        let cfg: Config = figment
+            .merge(Env::prefixed(PREFIX).split(NEST))
+            .extract()
+            .context("設定を読めない")?;
 
         if let Some(p) = &path {
             eprintln!("  設定 {}", p.display());
         }
+        let overridden: Vec<String> = std::env::vars()
+            .filter_map(|(k, _)| k.strip_prefix(PREFIX).map(str::to_lowercase))
+            .map(|k| k.replace(NEST, "."))
+            .collect();
         if !overridden.is_empty() {
             eprintln!("  環境変数で上書き: {}", overridden.join(", "));
         }
         Ok(cfg)
     }
-
-    /// 環境変数で上書きする。名前はキーの位置から機械的に決まる。
-    /// 上書きしたキーを返す。
-    fn apply_env(&mut self) -> Result<Vec<String>> {
-        let mut hit = Vec::new();
-        macro_rules! env {
-            ($($section:ident . $key:ident),* $(,)?) => {
-                $(
-                    let name = concat!(
-                        "DONNA_IRO_",
-                        stringify!($section), "_", stringify!($key)
-                    ).to_uppercase();
-                    if let Ok(raw) = std::env::var(&name) {
-                        self.$section.$key = parse(&raw, &name)?;
-                        hit.push(format!("{}.{}", stringify!($section), stringify!($key)));
-                    }
-                )*
-            };
-        }
-        env!(
-            paths.assets,
-            paths.model,
-            listen.max_seconds,
-            listen.hangover_ms,
-            listen.guard_ms,
-            listen.min_speech_ms,
-            listen.speech_ratio,
-            listen.speech_floor,
-            listen.speech_ceil,
-            listen.threshold,
-            recognize.audio_ctx,
-            recognize.head_segments,
-            game.insert_every,
-            game.flash_ms,
-        );
-        Ok(hit)
-    }
-}
-
-fn parse<T: std::str::FromStr>(raw: &str, name: &str) -> Result<T> {
-    raw.parse()
-        .map_err(|_| anyhow::anyhow!("{name} の値が読めない: {raw:?}"))
 }

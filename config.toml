@@ -1,44 +1,44 @@
 # donna-iro の設定。
 #
 # ここに書いてある値がそのまま既定値。消せばコード上の既定に戻る。
-# 各項目は環境変数でも上書きできる。名前はキーの位置から機械的に決まるので、
-# 対応は下のコメントのとおり。
+# 各項目は環境変数でも上書きできる。名前はキーの位置から機械的に決まる。
+# 節とキーの区切りは `__`（2本）。キー名自体に `_` が入るため。
 #
 #   cargo run                             この config.toml を読む
 #   cargo run -- --config other.toml      別のファイルを読む
-#   DONNA_IRO_RECOGNIZE_AUDIO_CTX=512 cargo run
+#   DONNA_IRO_RECOGNIZE__AUDIO_CTX=512 cargo run
 #                                         一時的に上書き（ファイルは触らない）
 
 [paths]
 # 音源のディレクトリ。空なら自動で選ぶ。
 # assets/ が揃っていればそれ、なければ assets/reference/（確認用の合成音）。
 # つくよみちゃんの音源を assets/ に置いた時点で自動で切り替わる。
-#   DONNA_IRO_PATHS_ASSETS
+#   DONNA_IRO_PATHS__ASSETS
 assets = ""
 
 # whisper のモデル。空なら models/ggml-tiny.bin。
 # 埋め込みビルドでも、ここが指定されていればファイルから読む。
-#   DONNA_IRO_PATHS_MODEL
+#   DONNA_IRO_PATHS__MODEL
 model = ""
 
 
 [listen]
 # 応答を待つ上限（秒）。2歳児は考えてから言うので短すぎると取りこぼす。
-#   DONNA_IRO_LISTEN_MAX_SECONDS
+#   DONNA_IRO_LISTEN__MAX_SECONDS
 max_seconds = 5.0
 
 # 声が途切れてから打ち切るまでの猶予（ミリ秒）。
 # 短くするほど反応が速くなるが、言い淀みで切れやすくなる。
-#   DONNA_IRO_LISTEN_HANGOVER_MS
+#   DONNA_IRO_LISTEN__HANGOVER_MS
 hangover_ms = 350
 
 # 窓を開けた直後、スピーカーの残響で誤発火しないよう判定を止める時間。
 # 録音自体は続くので、この間に話し始めても声は残る。
-#   DONNA_IRO_LISTEN_GUARD_MS
+#   DONNA_IRO_LISTEN__GUARD_MS
 guard_ms = 200
 
 # これだけ続けて初めて「聞こえた」とみなす（ミリ秒）。単発のノイズを弾く。
-#   DONNA_IRO_LISTEN_MIN_SPEECH_MS
+#   DONNA_IRO_LISTEN__MIN_SPEECH_MS
 min_speech_ms = 75
 
 # 発話とみなす音量。起動時に測った環境ノイズの ratio 倍を使い、
@@ -47,14 +47,14 @@ min_speech_ms = 75
 # 拾いすぎのコストはほぼゼロ（誤検出してもランダムな色が鳴るだけで、
 # 何も聞こえなかった場合と結果が同じ）。逆に取りこぼすと子どもが
 # 答えたのに無視される。迷ったら緩める側に倒すこと。
-#   DONNA_IRO_LISTEN_SPEECH_RATIO / _FLOOR / _CEIL
+#   DONNA_IRO_LISTEN__SPEECH_RATIO / __SPEECH_FLOOR / __SPEECH_CEIL
 speech_ratio = 2.0
 speech_floor = 0.005
 speech_ceil = 0.015
 
 # 0 より大きければ、環境ノイズを見ずにこの値で固定する。
 # 判定のたびに出る「最大 0.0xx」を見て決めるとよい。
-#   DONNA_IRO_LISTEN_THRESHOLD
+#   DONNA_IRO_LISTEN__THRESHOLD
 threshold = 0.0
 
 
@@ -63,22 +63,22 @@ threshold = 0.0
 # エンコードするので、下げると速くなる。ただし精度も落ちる。
 # 子どもの声で精度が落ちたとき、モデルを大きくするよりここを戻すほうが効いた。
 # ラズパイで遅ければ最初に触るつまみ。
-#   DONNA_IRO_RECOGNIZE_AUDIO_CTX
+#   DONNA_IRO_RECOGNIZE__AUDIO_CTX
 audio_ctx = 1500
 
 # 認識結果の先頭いくつの区間を信用するか。
 # tiny は短い音を渡されるとデコーダが暴走し、言っていない語を後ろに
 # 継ぎ足す（「あお」に対して「あお、おれんじ、あか」）。だから後ろは捨てる。
 # 1 にすると「えーと、あか」のような言い淀みを落とす。
-#   DONNA_IRO_RECOGNIZE_HEAD_SEGMENTS
+#   DONNA_IRO_RECOGNIZE__HEAD_SEGMENTS
 head_segments = 2
 
 
 [game]
 # 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
-#   DONNA_IRO_GAME_INSERT_EVERY
+#   DONNA_IRO_GAME__INSERT_EVERY
 insert_every = 3
 
 # フィナーレで色を差し替える間隔（ミリ秒）。
-#   DONNA_IRO_GAME_FLASH_MS
+#   DONNA_IRO_GAME__FLASH_MS
 flash_ms = 500

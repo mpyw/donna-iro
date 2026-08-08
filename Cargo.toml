@@ -41,7 +41,6 @@ openmp = ["whisper-rs?/openmp"]
 anyhow = "1"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
 
 # 録音 / 再生。どちらもクロスプラットフォームで、macOS では CoreAudio、
 # Raspberry Pi では ALSA を使う。ソースは共通のままでよい。
@@ -51,3 +50,4 @@ minifb = { version = "0.28", optional = true }
 
 # 音声認識: whisper.cpp の Rust バインディング
 whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }
+figment = { version = "0.10.19", features = ["toml", "env"] }
