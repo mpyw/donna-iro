@@ -3,7 +3,7 @@
 #
 #   tools/bundle-mac.sh
 #
-# Metal を有効にしてビルドするので、認識が CPU より数倍速い。
+# Metal は macOS で既定有効なので、指定は要らない。
 #
 # 音源とモデルは埋め込む。.app は CWD が / になるため、相対パスの
 # assets/ や models/ を読めない。埋め込まないと動かない。
@@ -24,7 +24,7 @@ for stem in intro question tail tail-lead bridge interlude all \
   red blue yellow green yellowgreen white black pink orange purple brown lightblue; do
   [ -f "assets/$stem.wav" ] || missing+=("assets/$stem.wav")
 done
-[ -f models/ggml-tiny.bin ] || missing+=("models/ggml-tiny.bin")
+[ -f models/ggml-base.bin ] || missing+=("models/ggml-base.bin")
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo ".app にするには音源とモデルを埋め込む必要があります（CWD が / になるため）。" >&2
@@ -39,8 +39,8 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "ビルド中（Metal + 埋め込み。whisper.cpp を組み直すので数分かかります）"
-cargo build --release --features metal,embed
+echo "ビルド中（Metal は macOS で既定有効。whisper.cpp を組み直すので数分かかります）"
+cargo build --release --features embed
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

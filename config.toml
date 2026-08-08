@@ -16,7 +16,7 @@
 #   DONNA_IRO_PATHS__ASSETS
 assets = ""
 
-# whisper のモデル。空なら models/ggml-tiny.bin。
+# whisper のモデル。空なら models/ggml-base.bin。
 # 埋め込みビルドでも、ここが指定されていればファイルから読む。
 #   DONNA_IRO_PATHS__MODEL
 model = ""

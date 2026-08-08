@@ -157,11 +157,10 @@ mod mic {
         }
     }
 
-    /// 既定は tiny。
-    ///
-    /// 子どもの声で精度が落ちたとき、モデルを base に上げるより
-    /// `audio_ctx` を戻すほうが効いた。エンコーダが小さいぶん tiny のまま
-    /// 文脈を full にしたほうが、base より速くて精度も出る。
+    /// 既定は base。tiny + `audio_ctx` full でも動くが、子どもの声には
+    /// base のほうが余裕がある。macOS では Metal が既定で効くので、
+    /// 速度の心配も要らない。ラズパイで遅ければ tiny に落とすか、
+    /// `audio_ctx` を下げる。
     ///
     /// `DONNA_IRO_MODEL` を指定すればファイルから読む。埋め込みビルドでも
     /// これが優先されるので、base を試したいときに使える。
@@ -176,7 +175,7 @@ mod mic {
         #[cfg(feature = "embed-model")]
         {
             const MODEL: &[u8] =
-                include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ggml-tiny.bin"));
+                include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ggml-base.bin"));
             return WhisperContext::new_from_buffer_with_params(
                 MODEL,
                 WhisperContextParameters::default(),
@@ -186,7 +185,7 @@ mod mic {
 
         #[cfg(not(feature = "embed-model"))]
         {
-            let path = "models/ggml-tiny.bin";
+            let path = "models/ggml-base.bin";
             WhisperContext::new_with_params(path, WhisperContextParameters::default())
                 .with_context(|| format!("モデルを読めない: {path}（tools/fetch-model.sh で取得）"))
         }

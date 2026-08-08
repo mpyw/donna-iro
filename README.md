@@ -24,7 +24,7 @@ intro
 git clone --recursive git@github.com:mpyw/donna-iro.git
 cd donna-iro
 git -C assets lfs pull      # 音源を取る
-tools/fetch-model.sh        # whisper のモデルを取る（tiny・74MB）
+tools/fetch-model.sh        # whisper のモデルを取る（base・141MB）
 cargo build --release
 ```
 
@@ -64,9 +64,9 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 | `whisper` | 音声認識。外すとキーボード入力のみ（ビルドが数十秒で済む） |
 | `window` | ウィンドウ描画。外すとターミナルに色名だけ |
 | `embed-audio` | 音源をバイナリに埋め込む |
-| `embed-model` | whisper のモデル（tiny・74MB）も埋め込む |
+| `embed-model` | whisper のモデル（base・141MB）も埋め込む |
 | `embed` | 上の2つ。**88MB のバイナリ1つで完結**する |
-| `metal` / `coreml` | **Apple 専用。** ラズパイでは使えない |
+| `coreml` | Apple 専用。Metal は macOS で**既定有効**なので指定不要 |
 | `openblas` / `openmp` | ラズパイ側の加速。素でも NEON は使うので、まず無指定で測る |
 
 ## 設計方針
@@ -169,11 +169,12 @@ private であれば公衆送信にあたらないため問題ない。本体を
 
 whisper のモデルはリポジトリには置かない。`tools/fetch-model.sh` で取る。
 
-既定は **tiny + `audio_ctx` 切り詰めなし**。
+既定は **base + `audio_ctx` 切り詰めなし**。macOS では Metal が既定で効くので、
+速度の心配は要らない。
 
-子どもの声で精度が落ちたとき、**モデルを base に上げるより `audio_ctx` を
-戻すほうが効いた。** whisper は入力を必ず30秒ぶん（=1500）に詰めてから
-エンコードするので、短い発話に合わせて下げると速くなるが、精度も落ちる。
-tiny はエンコーダが小さいぶん、文脈を full にしても base より速い。
+子どもの声で精度が落ちたとき、**モデルの大きさより `audio_ctx` のほうが効いた。**
+whisper は入力を必ず30秒ぶん（=1500）に詰めてからエンコードするので、短い発話に
+合わせて下げると速くなるが、精度も落ちる。
 
-ラズパイで遅ければ `DONNA_IRO_AUDIO_CTX` で下げるのが最初のつまみ。
+ラズパイで遅ければ、`config.toml` の `audio_ctx` を下げるか `model` を tiny に
+するのが最初のつまみ。

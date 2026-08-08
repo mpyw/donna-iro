@@ -23,12 +23,9 @@ window = ["dep:minifb"]
 embed-audio = []
 embed-model = []
 embed = ["embed-audio", "embed-model"]
-# --- 認識の加速。プラットフォームごとに使えるものが違う ---
+# --- 認識の加速 ---
 #
-# Apple 専用。ラズパイでは使えない。
-#   cargo build --release --features metal
-metal = ["whisper-rs?/metal"]
-coreml = ["whisper-rs?/coreml"]
+# macOS の Metal は下の [target] で既定有効にしてある。指定は要らない。
 #
 # ラズパイ側の選択肢。素の状態でも whisper.cpp が NEON を使うので
 # まずは無指定で測り、足りなければ試す。
@@ -36,6 +33,7 @@ coreml = ["whisper-rs?/coreml"]
 #   cargo build --release --features openblas
 openblas = ["whisper-rs?/openblas"]
 openmp = ["whisper-rs?/openmp"]
+coreml = ["whisper-rs?/coreml"]
 
 [dependencies]
 anyhow = "1"
@@ -50,4 +48,10 @@ minifb = { version = "0.28", optional = true }
 
 # 音声認識: whisper.cpp の Rust バインディング
 whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }
+
+# macOS では Metal を既定で有効にする。GPU を使うので CPU より数倍速い。
+# フィーチャーは同じ依存の宣言どうしで合流するので、ここで足すだけでよい。
+# ラズパイには Metal が無いため、この節ごと効かない。
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.16", optional = true, features = ["metal"] }
 figment = { version = "0.10.19", features = ["toml", "env"] }
