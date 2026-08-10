@@ -19,7 +19,8 @@ window = ["dep:minifb"]
 #   git -C assets lfs pull && tools/fetch-model.sh
 #   cargo build --release --features embed
 #
-# 両方入れて 88MB。1ファイル置くだけで、音源もモデルも要らずに動く。
+# 両方入れると 1ファイル置くだけで、音源もモデルも要らずに動く。
+# モデル（base）だけで 141MB あるので、それなりの大きさにはなる。
 embed-audio = []
 embed-model = []
 embed = ["embed-audio", "embed-model"]

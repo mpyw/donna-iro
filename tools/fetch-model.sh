@@ -8,7 +8,7 @@
 # ラズパイで遅ければ tiny に落とすか、config.toml の audio_ctx を下げる。
 #
 # モデルはリポジトリには置かない（LFS の無駄）。
-# 使うモデルは DONNA_IRO_MODEL で切り替える。
+# 使うモデルは config.toml の paths.model か、その環境変数で切り替える。
 #
 #   DONNA_IRO_PATHS__MODEL=models/ggml-tiny.bin cargo run
 
