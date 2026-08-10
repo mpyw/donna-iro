@@ -17,6 +17,12 @@ pub enum Frame {
     Palette([Color; Color::COUNT]),
     /// 1色だけ大きく。その色のフレーズを歌っている間。
     Single(Color),
+    /// 「もう1回」を待っている。
+    ///
+    /// 待っていることも、押せば続くことも、画面に出さないと誰にも
+    /// 分からない。ターミナルは `control::Stdin` が自前で促すので、
+    /// これが要るのは実質ウィンドウのほう。
+    Again,
 }
 
 impl Frame {
@@ -60,6 +66,8 @@ impl Screen for Terminal {
                 println!("── {} ──", names.join(" "));
             }
             Frame::Single(c) => println!("● {}", c.name()),
+            // `control::Stdin` がこのあとプロンプトを出すので、二重に言わない。
+            Frame::Again => {}
         }
     }
 }
