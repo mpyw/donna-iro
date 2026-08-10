@@ -65,11 +65,39 @@ fn main() -> Result<()> {
             }
             // ここで送信側が落ちるので、ウィンドウ側のループも抜ける。
         });
-        // ウィンドウを閉じたら main が返り、プロセスごと終わる。
-        window::run(rx)
+        // ウィンドウを閉じたらプロセスごと終わる。
+        let closed = window::run(rx);
+        if let Err(e) = &closed {
+            eprintln!("エラー: {e:#}");
+        }
+        quit(if closed.is_ok() { 0 } else { 1 })
     }
     #[cfg(not(feature = "window"))]
     unreachable!("terminal で分岐済み")
+}
+
+/// 後片付けをせずにプロセスを終わらせる。
+///
+/// ウィンドウを閉じた時点でも、ゲーム側のスレッドは音を鳴らしていたり
+/// whisper で認識している最中だったりする。止める手立ては無いので、
+/// そのまま main を返す（= `exit(3)` を通る）ことになるが、これだと
+/// whisper.cpp の Metal バックエンドが atexit で GPU デバイスを畳む際に
+/// 「まだ誰かがバッファを握っている」と気づいて落ちる。
+///
+///     ggml-metal-device.m: GGML_ASSERT([rsets->data count] == 0) failed
+///
+/// 終わるだけなので解放し損ねても困らない。`_exit(2)` で C++ の静的
+/// デストラクタを走らせずに抜ける。バッファリングされた出力は
+/// 捨てられてしまうので、先に流しておく。
+#[cfg(feature = "window")]
+fn quit(code: i32) -> ! {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    extern "C" {
+        fn _exit(code: i32) -> !;
+    }
+    unsafe { _exit(code) }
 }
 
 fn play(opts: Options, screen: Box<dyn Screen>) -> Result<()> {
