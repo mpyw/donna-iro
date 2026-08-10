@@ -162,8 +162,8 @@ mod mic {
     /// 速度の心配も要らない。ラズパイで遅ければ tiny に落とすか、
     /// `audio_ctx` を下げる。
     ///
-    /// `DONNA_IRO_MODEL` を指定すればファイルから読む。埋め込みビルドでも
-    /// これが優先されるので、base を試したいときに使える。
+    /// `paths.model`（`DONNA_IRO_PATHS__MODEL`）を指定すればファイルから読む。
+    /// 埋め込みビルドでもこれが優先されるので、別のモデルを試したいときに使える。
     fn load_model(cfg: &Config) -> Result<WhisperContext> {
         if let Some(path) = cfg.paths.model() {
             return WhisperContext::new_with_params(path, WhisperContextParameters::default())

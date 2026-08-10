@@ -10,7 +10,7 @@
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
 use anyhow::{Context, Result};
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 
 use crate::screen::{border, Frame, Rgb, Screen};
 
@@ -30,7 +30,12 @@ impl Screen for Remote {
 }
 
 /// メインスレッドで回す。ウィンドウが閉じられたら返る。
-pub fn run(rx: Receiver<Frame>) -> Result<()> {
+///
+/// `again` は「もう1回」の合図を送る口。テレビの前にキーボードもマウスも
+/// 無い前提なので、本命は CEC のリモコンだが、そちらは普通の入力デバイスと
+/// して生えるぶんにはここに届く。届かない機種なら evdev を読む送り手を
+/// 別に立てて、同じチャンネルに流す。
+pub fn run(rx: Receiver<Frame>, again: Sender<()>) -> Result<()> {
     let mut window = Window::new(
         "どんないろがすき",
         WIDTH,
@@ -46,6 +51,7 @@ pub fn run(rx: Receiver<Frame>) -> Result<()> {
 
     let mut buf = vec![0u32; WIDTH * HEIGHT];
     let mut frame = Frame::palette();
+    let mut was_down = false;
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         // 溜まっているぶんは捨てて最新だけ描く。
@@ -53,11 +59,26 @@ pub fn run(rx: Receiver<Frame>) -> Result<()> {
             match rx.try_recv() {
                 Ok(f) => frame = f,
                 Err(TryRecvError::Empty) => break,
-                // ゲーム側が終わった（エンディングまで行った、または落ちた）。
+                // ゲーム側が終わった（「もう1回」に応えが無かった、または落ちた）。
                 // ウィンドウだけ残っても意味がないので畳む。
                 Err(TryRecvError::Disconnected) => return Ok(()),
             }
         }
+
+        // クリックは押した瞬間だけ拾う。get_mouse_down は押している間ずっと
+        // 真なので、そのまま流すと 30fps ぶんの連打になる。キーのほうは
+        // KeyRepeat::No で minifb が同じことをしてくれる。
+        let down = window.get_mouse_down(MouseButton::Left);
+        if (down && !was_down)
+            || window.is_key_pressed(Key::Space, KeyRepeat::No)
+            || window.is_key_pressed(Key::Enter, KeyRepeat::No)
+        {
+            // 待っていないときに送ったぶんは受け手が捨てる。ここでは
+            // 遊びの最中かどうかを知らないので、素通しでよい。
+            let _ = again.send(());
+        }
+        was_down = down;
+
         paint(&mut buf, frame);
         window.update_with_buffer(&buf, WIDTH, HEIGHT)?;
     }
