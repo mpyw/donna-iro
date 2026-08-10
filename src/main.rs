@@ -4,6 +4,7 @@
 //!     cargo run                             マイク＋ウィンドウ
 //!     cargo run -- --terminal               ウィンドウを使わず色名だけ
 //!     cargo run -- --keyboard               マイクの代わりに手打ち
+//!     cargo run -- --once                   フィナーレで終わる（もう1回を待たない）
 //!     cargo run -- --config other.toml      別の設定ファイルを読む
 //!     cargo run --no-default-features       whisper もウィンドウも無し
 //!
@@ -12,6 +13,7 @@
 mod audio;
 mod color;
 mod config;
+mod control;
 mod cue;
 mod game;
 mod listener;
@@ -23,6 +25,7 @@ mod window;
 use anyhow::Result;
 
 use audio::Player;
+use control::Control;
 use game::Game;
 use listener::Listener;
 use screen::Screen;
@@ -30,6 +33,7 @@ use screen::Screen;
 struct Options {
     keyboard: bool,
     terminal: bool,
+    once: bool,
     config: config::Config,
 }
 
@@ -43,6 +47,7 @@ fn main() -> Result<()> {
     let opts = Options {
         keyboard: args.iter().any(|a| a == "--keyboard"),
         terminal: args.iter().any(|a| a == "--terminal") || cfg!(not(feature = "window")),
+        once: args.iter().any(|a| a == "--once"),
         config: config::Config::load(explicit.as_deref())?,
     };
 
@@ -50,7 +55,12 @@ fn main() -> Result<()> {
     audio::check_assets(&opts.config)?;
 
     if opts.terminal {
-        return play(opts, Box::new(screen::Terminal));
+        let control: Box<dyn Control> = if opts.once {
+            Box::new(control::Never)
+        } else {
+            Box::new(control::Stdin)
+        };
+        return play(opts, Box::new(screen::Terminal), control);
     }
 
     #[cfg(feature = "window")]
@@ -59,14 +69,22 @@ fn main() -> Result<()> {
         // rodio も !Send なので、ゲーム側をワーカースレッドに出して
         // そこで音の口を開く。
         let (tx, rx) = std::sync::mpsc::channel();
+        // 逆向きに1本。フレームを送るのと向きだけが違う。
+        let (again_tx, again_rx) = std::sync::mpsc::channel();
+        let control: Box<dyn Control> = if opts.once {
+            drop(again_rx);
+            Box::new(control::Never)
+        } else {
+            Box::new(control::Channel(again_rx))
+        };
         std::thread::spawn(move || {
-            if let Err(e) = play(opts, Box::new(window::Remote(tx))) {
+            if let Err(e) = play(opts, Box::new(window::Remote(tx)), control) {
                 eprintln!("エラー: {e:#}");
             }
             // ここで送信側が落ちるので、ウィンドウ側のループも抜ける。
         });
         // ウィンドウを閉じたらプロセスごと終わる。
-        let closed = window::run(rx);
+        let closed = window::run(rx, again_tx);
         if let Err(e) = &closed {
             eprintln!("エラー: {e:#}");
         }
@@ -100,10 +118,10 @@ fn quit(code: i32) -> ! {
     unsafe { _exit(code) }
 }
 
-fn play(opts: Options, screen: Box<dyn Screen>) -> Result<()> {
+fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Result<()> {
     let player = Player::new()?;
     let ears = open_ears(&opts)?;
-    Game::new(player, ears, screen, &opts.config).run()
+    Game::new(player, ears, screen, control, &opts.config).run()
 }
 
 #[cfg(feature = "whisper")]

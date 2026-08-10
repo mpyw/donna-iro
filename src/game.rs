@@ -13,9 +13,15 @@
 //! └──┘                    「ぜんぶ！」と言うまで無限ループ
 //!      ↓「ぜんぶ！」
 //!    finale               転調 → ぜんぶの節 → エンディング
+//!      ↓
+//!    もう1回？             操作を待つ。押されたら intro へ戻る
 //! ```
 //!
 //! 要点は**無反応にしないこと**。判定できなくても必ず何かを鳴らす。
+//!
+//! ただし**フィナーレのあとだけはポリシーが反転する**。あそこは遊びの
+//! ループの外なので、無反応は「もう終わり」と読んでよい。ここで
+//! ランダムに倒すと永久に終われなくなる。
 
 use std::time::{Duration, Instant};
 
@@ -24,6 +30,7 @@ use anyhow::Result;
 use crate::audio::Player;
 use crate::color::Color;
 use crate::config::Config;
+use crate::control::Control;
 use crate::cue::Cue;
 use crate::listener::Listener;
 use crate::matcher::{Answer, Matcher};
@@ -34,6 +41,7 @@ pub struct Game {
     screen: Box<dyn Screen>,
     matcher: Matcher,
     ears: Box<dyn Listener>,
+    control: Box<dyn Control>,
     listen_max: Duration,
     insert_every: u32,
     flash: Duration,
@@ -44,6 +52,7 @@ impl Game {
         player: Player,
         ears: Box<dyn Listener>,
         screen: Box<dyn Screen>,
+        control: Box<dyn Control>,
         cfg: &Config,
     ) -> Self {
         Self {
@@ -51,13 +60,31 @@ impl Game {
             screen,
             matcher: Matcher::new(cfg.recognize.head_segments),
             ears,
+            control,
             listen_max: cfg.listen.max(),
             insert_every: cfg.game.insert_every,
             flash: cfg.game.flash(),
         }
     }
 
+    /// ひと続き遊んで、そのあと「もう1回」を待つ。
+    ///
+    /// 待ちに声を使わないのは `control` 側に書いてある。ここで見るのは
+    /// 「続けると言われたか」だけ。
     pub fn run(&mut self) -> Result<()> {
+        loop {
+            self.play_through()?;
+            if !self.control.wait() {
+                return Ok(());
+            }
+        }
+    }
+
+    /// イントロから「ぜんぶ！」のフィナーレまで、ひと続き。
+    ///
+    /// 周回数はここで閉じているので、もう1回のたびに区切りの周期も
+    /// 頭から数え直す。前回の続きから間奏が来ると唐突になる。
+    fn play_through(&mut self) -> Result<()> {
         self.screen.show(Frame::palette());
         self.player.play(Cue::Intro)?;
 
