@@ -122,6 +122,9 @@ impl Ears {
             fault,
         };
         eprintln!("  環境ノイズ {floor:.4} → しきい値 {:.4}", ears.threshold());
+        // 測っている間に壊れていたらここで止める。起動時に死んでいる
+        // マイクで開始して、最初の聞き取りまで気づかないのを避ける。
+        ears.check_fault()?;
         Ok(ears)
     }
 

@@ -233,6 +233,16 @@ impl Config {
             );
         }
 
+        // 打ち切りの猶予が窓より長いと、一度でも声が入れば毎回 max まで
+        // 待ち切る。落ちはしないが、指定した意味が消える。
+        if self.listen.hangover_ms >= window_ms {
+            anyhow::bail!(
+                "listen.hangover_ms（{}ms）が max_seconds（{window_ms}ms）以上。\
+                 このままだと打ち切りが一度も効かない",
+                self.listen.hangover_ms
+            );
+        }
+
         if self.listen.speech_floor > self.listen.speech_ceil {
             anyhow::bail!(
                 "listen.speech_floor は speech_ceil 以下であること（いまは {} > {}）",
@@ -324,6 +334,8 @@ mod tests {
         // 下拵えが窓に収まらない = 何を言っても無言
         assert!(bad(|c| c.listen.guard_ms = 9_000).contains("収まっていない"));
         assert!(bad(|c| c.listen.min_speech_ms = 9_000).contains("収まっていない"));
+        // 打ち切りが一度も効かない
+        assert!(bad(|c| c.listen.hangover_ms = 9_000).contains("hangover_ms"));
         // clamp がパニックする。しかも聞き取りのたび
         assert!(bad(|c| c.listen.speech_floor = 0.9).contains("speech_ceil"));
         // 割り算

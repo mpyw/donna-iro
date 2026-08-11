@@ -171,6 +171,11 @@ impl Matcher {
         let mut parts: Vec<String> = Vec::new();
         // 直前の区間へ繋いでよいか。**質問が挟まった時点で切れる。**
         let mut joinable = false;
+        // まだ実のある区間が1つも無いときの溜め。**破片は後ろ向きにしか
+        // 繋げないので、割れた語の1つ目が質問文の一部だと繋ぎ先が無い。**
+        // 「き、いろ」の「き」は「すき」の一部なので、そのまま捨てると
+        // きいろ が丸ごと消える。
+        let mut pending = String::new();
 
         for seg in segments(&normalize(raw)) {
             if seg.is_empty() {
@@ -180,8 +185,9 @@ impl Matcher {
             let seg = strip_prompt(&seg);
             if seg.is_empty() {
                 // まるごと質問だった。**ここから後ろの破片は、前の語の
-                // 続きではなく質問の続き。** 繋ぎ先を切る。
+                // 続きではなく質問の続き。** 繋ぎ先を切り、溜めも捨てる。
                 joinable = false;
+                pending.clear();
                 continue;
             }
             if QUESTION.contains(seg.as_str()) {
@@ -195,6 +201,22 @@ impl Matcher {
                 //
                 // **捨てるのは `truncate` の前でなければならない。** 破片が
                 // 席を占めると、後ろの本当の答えが `head` から押し出される。
+                if parts.is_empty() {
+                    // 繋ぎ先がまだ無い。溜めておいて、**質問文の一部で
+                    // なくなった時点で**実のある区間に昇格させる。
+                    // 「き」→「きいろ」で抜ける。
+                    //
+                    // 質問がそのまま割れて届くぶんには、順番どおり
+                    // 「いろ」「いろが」「いろがすき」と伸びるので
+                    // 一度も抜けない。逆順に届けば抜けてしまうが、
+                    // 歌が逆順に回り込むことはない。
+                    pending.push_str(&seg);
+                    if !QUESTION.contains(pending.as_str()) {
+                        parts.push(std::mem::take(&mut pending));
+                        joinable = true;
+                    }
+                    continue;
+                }
                 if joinable {
                     if let Some(prev) = parts.last_mut() {
                         prev.push_str(&seg);
@@ -204,21 +226,38 @@ impl Matcher {
             }
             parts.push(seg);
             joinable = true;
+            pending.clear();
         }
         // 同じ語の繰り返しは畳む。tiny が出力を繰り返すことがある。
         parts.dedup();
         parts.truncate(self.head);
 
         // 先頭の区間から順に。単独で当たらなければ次と繋げて試す。
+        //
+        // **結合の完全一致は、単独の音の近さより先に見る。** 単独で3段を
+        // 使い切ってから結合に移ると、割れた語の前半がたまたま別の色に
+        // 近いだけで確定してしまう。
+        //
+        //     「むら さき」→ くろ    （むら が d=4 で当たる）
+        //     「きみ どり」→ きいろ  （きみ が d=6 で当たる）
+        //
+        // 空白が区切りになる前は `normalize` が繋ぎ直していたので、この段の
+        // 脆さは読点割れでしか出なかった。
+        //
+        // **結合の部分一致は単独の音の近さより後ろ。** 前に出すと
+        // 「みじろ、きいろ」が結合の部分一致で きいろ になり、幻覚の
+        // 継ぎ足しを捨てる仕掛けが壊れる。
         (0..parts.len()).find_map(|i| {
-            (1..=2.min(parts.len() - i)).find_map(|take| self.judge(&parts[i..i + take].concat()))
+            let single = parts[i].as_str();
+            let joined = (parts.len() - i >= 2).then(|| parts[i..i + 2].concat());
+            let joined = joined.as_deref();
+            self.exact(single)
+                .or_else(|| self.substring(single))
+                .or_else(|| joined.and_then(|j| self.exact(j)))
+                .or_else(|| self.nearest(single))
+                .or_else(|| joined.and_then(|j| self.substring(j)))
+                .or_else(|| joined.and_then(|j| self.nearest(j)))
         })
-    }
-
-    fn judge(&self, text: &str) -> Option<Answer> {
-        self.exact(text)
-            .or_else(|| self.substring(text))
-            .or_else(|| self.nearest(text))
     }
 
     fn exact(&self, text: &str) -> Option<Answer> {
@@ -632,6 +671,27 @@ mod tests {
         // 認識が「ちゃいろ」を「じゃあ、いろ」に割ったときの実例。
         // 後半だけ見ると「しろ」が最も近い。全体で見れば茶色が勝つ。
         assert_eq!(find("じゃあ、いろ。"), c(Color::Brown));
+
+        // **前半がたまたま別の色に近いだけで確定してはいけない。**
+        // 単独で3段を使い切ってから結合に移っていた頃は、「むら」が
+        // くろ に、「きみ」が きいろ に音の近さで当たって、結合の
+        // 完全一致まで届かなかった。
+        assert_eq!(find("むら さき"), c(Color::Purple));
+        assert_eq!(find("むら、さき"), c(Color::Purple));
+        assert_eq!(find("きみ どり"), c(Color::YellowGreen));
+
+        // **割れた語の1つ目が質問文の一部でも消してはいけない。**
+        // 「き」は「すき」の一部。後ろ向きにしか繋がなかった頃は、
+        // 繋ぎ先が無くて捨てられ、きいろ が丸ごと消えていた。
+        assert_eq!(find("き、いろ"), c(Color::Yellow));
+        assert_eq!(find("き いろ"), c(Color::Yellow));
+        assert_eq!(find("みず いろ"), c(Color::LightBlue));
+        assert_eq!(find("ちゃ いろ"), c(Color::Brown));
+
+        // 幻覚の継ぎ足しを捨てる仕掛けは保つ。結合の部分一致を
+        // 単独の音の近さより前に出すと、ここが きいろ になる。
+        assert_eq!(find("みじろ、きいろ"), c(Color::LightBlue));
+        assert_eq!(find("どんな いろ みじろ"), c(Color::LightBlue));
     }
 
     #[test]

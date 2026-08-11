@@ -87,7 +87,10 @@ target_deps() {
 mac_deps="$(target_deps aarch64-apple-darwin)"
 linux_deps="$(target_deps aarch64-unknown-linux-gnu)"
 if [ -z "$mac_deps" ] || [ -z "$linux_deps" ]; then
-  printf '%-22s %s\n' "Linux の依存" "調べられなかった（cargo tree が失敗）"
+  # **調べられなかったら緑にしない。** ここは静かに壊れる経路を塞ぐための
+  # 検査なので、検査器が死んだまま通ると意味が反転する。
+  printf '%-22s %s\n' "Linux の依存" "NG: 調べられなかった（cargo tree が失敗）"
+  fail=1
 else
   only_mac="$(comm -23 <(printf '%s\n' "$mac_deps") <(printf '%s\n' "$linux_deps") | tr '\n' ' ')"
   if [ -n "${only_mac// /}" ]; then
