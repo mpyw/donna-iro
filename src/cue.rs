@@ -6,7 +6,7 @@
 use strum::{EnumCount, VariantArray};
 
 use crate::color::Color;
-use crate::consts::for_range;
+use const_for::const_for;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
 pub enum Cue {
@@ -73,10 +73,10 @@ impl Cue {
     /// 素材の一覧。埋め込みビルドと素材チェックが参照する。
     pub const fn every() -> [Cue; Self::COUNT] {
         let mut out = [Cue::Intro; Self::COUNT];
-        for_range!(i in 0..Self::COMMON.len() => {
+        const_for!(i in 0..Self::COMMON.len() => {
             out[i] = Self::COMMON[i];
         });
-        for_range!(j in 0..Color::COUNT => {
+        const_for!(j in 0..Color::COUNT => {
             out[Self::COMMON.len() + j] = Cue::Color(Color::VARIANTS[j]);
         });
         out

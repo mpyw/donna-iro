@@ -44,7 +44,7 @@ mod mic {
     use crate::audio::{Ears, WHISPER_SR};
     use crate::color::Answer;
     use crate::config::Config;
-    use crate::consts::for_range;
+    use const_for::const_for;
 
     /// モデルも状態も起動時に一度だけ作る。
     ///
@@ -64,7 +64,7 @@ mod mic {
     const fn vocabulary_len() -> usize {
         let every = Answer::every();
         let mut n = 0;
-        for_range!(i in 0..Answer::COUNT => {
+        const_for!(i in 0..Answer::COUNT => {
             n += every[i].reading().len();
             if i + 1 < Answer::COUNT {
                 n += JOIN.len();
@@ -78,7 +78,7 @@ mod mic {
     /// const では `copy_from_slice` が使えないので手で回す。3箇所で同じ
     /// ことをするので括り出してある。
     const fn put(dst: &mut [u8], at: usize, src: &[u8]) -> usize {
-        for_range!(i in 0..src.len() => {
+        const_for!(i in 0..src.len() => {
             dst[at + i] = src[i];
         });
         at + src.len()
@@ -89,7 +89,7 @@ mod mic {
         let every = Answer::every();
         let mut out = [0u8; vocabulary_len()];
         let mut n = 0;
-        for_range!(i in 0..Answer::COUNT => {
+        const_for!(i in 0..Answer::COUNT => {
             n = put(&mut out, n, every[i].reading().as_bytes());
             if i + 1 < Answer::COUNT {
                 n = put(&mut out, n, JOIN.as_bytes());

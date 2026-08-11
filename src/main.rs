@@ -13,7 +13,6 @@
 mod audio;
 mod color;
 mod config;
-mod consts;
 mod control;
 mod cue;
 mod game;

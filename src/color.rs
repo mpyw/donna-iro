@@ -13,7 +13,7 @@
 
 use strum::{EnumCount, VariantArray};
 
-use crate::consts::for_range;
+use const_for::const_for;
 
 /// 光の三原色。色の言葉なのでここに置く。
 ///
@@ -28,7 +28,7 @@ pub type Rgb = (u8, u8, u8);
 const fn lower<const N: usize>(s: &str) -> [u8; N] {
     let bytes = s.as_bytes();
     let mut out = [0u8; N];
-    for_range!(i in 0..N => {
+    const_for!(i in 0..N => {
         out[i] = bytes[i].to_ascii_lowercase();
     });
     out
@@ -234,7 +234,7 @@ impl Answer {
     /// ようにするため。
     pub const fn every() -> [Answer; Self::COUNT] {
         let mut out = [Answer::All; Self::COUNT];
-        for_range!(i in 0..Color::COUNT => {
+        const_for!(i in 0..Color::COUNT => {
             out[i] = Answer::Single(Color::VARIANTS[i]);
         });
         out
