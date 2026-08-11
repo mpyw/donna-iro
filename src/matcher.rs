@@ -30,22 +30,6 @@ use const_for::const_for;
 /// きいろの読み「いーろ」に化けることがある。長いものから順に削る。
 const PROMPT: &[&str] = &["どんないろがすき", "どんないろ", "どんな"];
 
-/// 許容する編集距離。短い読みほど厳しくする。
-///
-/// 単位は `substitution` の重みなので、4 が「1音ぶんのずれ」にあたる。
-/// 2文字の読みは1音、3文字以上は1音半まで許す。
-///
-/// **「ぜんぶ」だけは1音までに絞る。** 誤検出するとゲームが終わって
-/// しまうため。緩めると「でんわ」あたりが引っかかる。
-/// 逆に取りこぼしても次の周回でまた聞けるので、そちらの害は小さい。
-fn allowed(answer: Answer, reading_len: usize) -> usize {
-    match answer {
-        Answer::All => 4,
-        Answer::Single(_) if reading_len <= 2 => 4,
-        Answer::Single(_) => 6,
-    }
-}
-
 /// 拗音と長音を落とした骨格。編集距離を測るときだけ使う。
 ///
 /// 幼児の発音は「ぜ」が「じぇ」に、「ぶ」が「ば」に寄る。小書き文字と
@@ -93,32 +77,32 @@ const fn char_count(s: &str) -> usize {
 /// 候補の数。読みが全応答ぶん、漢字はある応答のぶんだけ。
 const CANDIDATE_COUNT: usize = Answer::COUNT + kanji_count();
 
-/// 候補の並び順。**同点が出ないところまで見る。**
-///
-/// 長さの降順が主。短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
-/// あるので、部分一致は長いほうから試さないと取りこぼす。
-///
-/// 同じ長さなら元の位置の昇順。作る順は「読みを全部 → 漢字を全部」で、
-/// どちらも `Answer::every()` の順なので、これで「読みが漢字より先」と
-/// 「先に宣言した色が先」の両方が決まる。
-///
-/// **ここまで見れば同点が無い。** 並べ替えが安定かどうかに結果が依らない
-/// ので、不安定なアルゴリズムを使ってもよい。
-const fn before(a: (Answer, &str, usize), b: (Answer, &str, usize)) -> bool {
-    let (la, lb) = (char_count(a.1), char_count(b.1));
-    if la != lb {
-        la > lb
-    } else {
-        a.2 < b.2
-    }
-}
-
 /// 判定の候補。
 ///
 /// **`normalize` は通さない。** 語彙の側が正規形で書かれている約束
 /// （`color.rs` を見ること）なので、通しても何も起きない。破れていない
 /// ことは `vocabulary_is_already_normalized` で見ている。
 const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
+    // 候補の並び順。**同点が出ないところまで見る。**
+    //
+    // 長さの降順が主。短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
+    // あるので、部分一致は長いほうから試さないと取りこぼす。
+    //
+    // 同じ長さなら元の位置の昇順。作る順は「読みを全部 → 漢字を全部」で、
+    // どちらも `Answer::every()` の順なので、これで「読みが漢字より先」と
+    // 「先に宣言した色が先」の両方が決まる。
+    //
+    // **ここまで見れば同点が無い。** 並べ替えが安定かどうかに結果が依らない
+    // ので、不安定なアルゴリズムを使ってもよい。
+    const fn before(a: (Answer, &str, usize), b: (Answer, &str, usize)) -> bool {
+        let (la, lb) = (char_count(a.1), char_count(b.1));
+        if la != lb {
+            la > lb
+        } else {
+            a.2 < b.2
+        }
+    }
+
     let every = Answer::every();
 
     // 3つ目は作った順。並べ替えの second key に使う。
@@ -198,6 +182,22 @@ impl Matcher {
     }
 
     fn nearest(&self, text: &str) -> Option<Answer> {
+        // 許容する編集距離。短い読みほど厳しくする。
+        //
+        // 単位は `substitution` の重みなので、4 が「1音ぶんのずれ」にあたる。
+        // 2文字の読みは1音、3文字以上は1音半まで許す。
+        //
+        // **「ぜんぶ」だけは1音までに絞る。** 誤検出するとゲームが終わって
+        // しまうため。緩めると「でんわ」あたりが引っかかる。
+        // 逆に取りこぼしても次の周回でまた聞けるので、そちらの害は小さい。
+        const fn allowed(answer: Answer, reading_len: usize) -> usize {
+            match answer {
+                Answer::All => 4,
+                Answer::Single(_) if reading_len <= 2 => 4,
+                Answer::Single(_) => 6,
+            }
+        }
+
         let chars = skeleton(text);
         if chars.is_empty() {
             return None;

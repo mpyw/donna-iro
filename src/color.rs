@@ -21,19 +21,6 @@ use const_for::const_for;
 /// 読む向きになっていた。色は画面を知らなくても成り立つ。
 pub type Rgb = (u8, u8, u8);
 
-/// ASCII を小文字にする。変種名から素材名を作るためだけのもの。
-///
-/// `const` で回すには長さが型に載っている必要があるので、呼ぶ側が
-/// `stringify!` の長さを渡す。非 ASCII は来ない（変種名は識別子）。
-const fn lower<const N: usize>(s: &str) -> [u8; N] {
-    let bytes = s.as_bytes();
-    let mut out = [0u8; N];
-    const_for!(i in 0..N => {
-        out[i] = bytes[i].to_ascii_lowercase();
-    });
-    out
-}
-
 /// 色の定義から `Color` と、色ごとの値を返す `const fn` を一度に作る。
 ///
 /// 項目を1つでも書き忘れれば、その色はパターンに合わずマクロ展開で止まる。
@@ -114,6 +101,19 @@ macro_rules! colors {
             /// `macro_rules!` に大文字小文字の変換は無いので `const fn` で回す。
             /// 長さを型に載せないと配列が作れないため `stringify!` の長さを渡す。
             pub const fn stem(&self) -> &'static str {
+                // ASCII を小文字にする。変種名から素材名を作るためだけのもの。
+                //
+                // `const` で回すには長さが型に載っている必要があるので、呼ぶ側が
+                // `stringify!` の長さを渡す。非 ASCII は来ない（変種名は識別子）。
+                const fn lower<const N: usize>(s: &str) -> [u8; N] {
+                    let bytes = s.as_bytes();
+                    let mut out = [0u8; N];
+                    const_for!(i in 0..N => {
+                        out[i] = bytes[i].to_ascii_lowercase();
+                    });
+                    out
+                }
+
                 match self {
                     $(Color::$variant => {
                         const N: usize = stringify!($variant).len();

@@ -19,8 +19,6 @@ mod game;
 mod listener;
 mod matcher;
 mod screen;
-#[cfg(feature = "window")]
-mod window;
 
 use anyhow::Result;
 
@@ -56,11 +54,11 @@ fn main() -> Result<()> {
 
     if opts.terminal {
         let control: Box<dyn Control> = if opts.once {
-            Box::new(control::Never)
+            Box::new(control::never::Never)
         } else {
-            Box::new(control::Stdin)
+            Box::new(control::stdin::Stdin)
         };
-        return play(opts, Box::new(screen::Terminal), control);
+        return play(opts, Box::new(screen::terminal::Terminal), control);
     }
 
     #[cfg(feature = "window")]
@@ -73,18 +71,18 @@ fn main() -> Result<()> {
         let (again_tx, again_rx) = std::sync::mpsc::channel();
         let control: Box<dyn Control> = if opts.once {
             drop(again_rx);
-            Box::new(control::Never)
+            Box::new(control::never::Never)
         } else {
-            Box::new(control::Channel(again_rx))
+            Box::new(control::channel::Channel(again_rx))
         };
         std::thread::spawn(move || {
-            if let Err(e) = play(opts, Box::new(window::Remote(tx)), control) {
+            if let Err(e) = play(opts, Box::new(screen::window::Remote(tx)), control) {
                 eprintln!("エラー: {e:#}");
             }
             // ここで送信側が落ちるので、ウィンドウ側のループも抜ける。
         });
         // ウィンドウを閉じたらプロセスごと終わる。
-        let closed = window::run(rx, again_tx);
+        let closed = screen::window::run(rx, again_tx);
         if let Err(e) = &closed {
             eprintln!("エラー: {e:#}");
         }
@@ -127,13 +125,13 @@ fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Re
 #[cfg(feature = "whisper")]
 fn open_ears(opts: &Options) -> Result<Box<dyn Listener>> {
     if opts.keyboard {
-        return Ok(Box::new(listener::Keyboard));
+        return Ok(Box::new(listener::keyboard::Keyboard));
     }
     let ears = audio::Ears::new(&opts.config)?;
-    Ok(Box::new(listener::Mic::new(ears, &opts.config)?))
+    Ok(Box::new(listener::mic::Mic::new(ears, &opts.config)?))
 }
 
 #[cfg(not(feature = "whisper"))]
 fn open_ears(_opts: &Options) -> Result<Box<dyn Listener>> {
-    Ok(Box::new(listener::Keyboard))
+    Ok(Box::new(listener::keyboard::Keyboard))
 }
