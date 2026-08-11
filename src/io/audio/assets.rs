@@ -121,7 +121,9 @@ fn complete(dir: &Path) -> bool {
 
 /// 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動かせる。
 ///
-///     cargo build --release --features embed-audio
+/// ```text
+/// cargo build --release --features embed-audio
+/// ```
 ///
 /// `include_bytes!` はコンパイル時にファイルを要求するので、
 /// 音源が揃うまではこのフィーチャーを有効にできない。

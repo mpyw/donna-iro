@@ -196,7 +196,9 @@ fn exit_code(window_ok: bool, game: Result<bool, std::sync::mpsc::TryRecvError>)
 /// whisper.cpp の Metal バックエンドが atexit で GPU デバイスを畳む際に
 /// 「まだ誰かがバッファを握っている」と気づいて落ちる。
 ///
-///     ggml-metal-device.m: GGML_ASSERT([rsets->data count] == 0) failed
+/// ```text
+/// ggml-metal-device.m: GGML_ASSERT([rsets->data count] == 0) failed
+/// ```
 ///
 /// 終わるだけなので解放し損ねても困らない。`_exit(2)` で C++ の静的
 /// デストラクタを走らせずに抜ける。バッファリングされた出力は
