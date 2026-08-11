@@ -75,6 +75,13 @@ macro_rules! colors {
         }
 
         impl Color {
+            /// 全色。表に並べた順そのまま。
+            ///
+            /// `VARIANTS` と中身は同じだが、あちらはスライス。並べ替えて
+            /// 持ち回る（フィナーレのシャッフル）には丈の決まった配列が要る。
+            /// 一覧を二重に持っているわけではなく、どちらも表から生える。
+            pub const ALL: [Color; Self::COUNT] = [$(Color::$variant,)*];
+
             /// 認識結果にマッチさせる読み。ひらがなの正式形をひとつだけ持つ。
             ///
             /// 表記ゆれや聞き間違いを並べていた時期もあったが、
@@ -198,24 +205,6 @@ colors! {
 }
 
 impl Color {
-    /// 全色を宣言順に並べた配列。
-    ///
-    /// 一覧そのものは `VARIANTS` が持っている。ただしあちらはスライスなので、
-    /// 並べ替えて持ち回る（フィナーレのシャッフル）には丈の決まった配列が要る。
-    /// これはその入れ物への移し替えであって、一覧を二重に持つわけではない。
-    ///
-    /// `COUNT` と `VARIANTS` は同じ derive から出るので長さは必ず一致し、
-    /// 添字が外れることはない。
-    pub const fn all() -> [Color; Self::COUNT] {
-        let mut out = [Color::VARIANTS[0]; Self::COUNT];
-        let mut i = 1;
-        while i < Self::COUNT {
-            out[i] = Color::VARIANTS[i];
-            i += 1;
-        }
-        out
-    }
-
     pub fn random() -> Color {
         use rand::seq::SliceRandom;
         *Color::VARIANTS.choose(&mut rand::thread_rng()).unwrap()
@@ -282,10 +271,13 @@ mod tests {
     /// **この関数はコンパイルが通った時点で半分終わっている。**
     #[test]
     fn is_usable_in_const_context() {
-        const ALL: [Color; Color::COUNT] = Color::all();
         const RED: &str = Color::Red.reading();
 
-        assert_eq!(ALL.as_slice(), Color::VARIANTS, "一覧が VARIANTS とずれた");
+        assert_eq!(
+            Color::ALL.as_slice(),
+            Color::VARIANTS,
+            "ALL と VARIANTS がずれた"
+        );
         assert_eq!(RED, "あか");
     }
 

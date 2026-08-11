@@ -154,7 +154,7 @@ impl Game {
     fn finale(&mut self) -> Result<()> {
         let timing = self.player.begin(Cue::Finale)?;
         let end = Instant::now() + timing.total;
-        let mut order = Color::all();
+        let mut order = Color::ALL;
         while Instant::now() < end {
             order = shuffle(&order);
             self.screen.show(Frame::Palette(order));
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn shuffle_moves_every_position() {
-        let mut order = Color::all();
+        let mut order = Color::ALL;
         for _ in 0..200 {
             let next = shuffle(&order);
             // 全色が1つずつ残っている

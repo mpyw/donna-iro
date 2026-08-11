@@ -28,7 +28,7 @@ pub enum Frame {
 impl Frame {
     /// 既定の並びの全色。
     pub const fn palette() -> Frame {
-        Frame::Palette(Color::all())
+        Frame::Palette(Color::ALL)
     }
 }
 

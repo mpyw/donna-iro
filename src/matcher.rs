@@ -19,6 +19,8 @@
 //!
 //! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
+use sort_const::const_quicksort;
+
 use crate::color::Answer;
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
@@ -101,14 +103,14 @@ const CANDIDATE_COUNT: usize = Answer::COUNT + kanji_count();
 /// どちらも `Answer::every()` の順なので、これで「読みが漢字より先」と
 /// 「先に宣言した色が先」の両方が決まる。
 ///
-/// **ここまで見れば同点が無い。** 並べ替えが安定かどうかに結果が依らなく
-/// なるので、アルゴリズムを差し替えても並びは変わらない。
-const fn after(a: (Answer, &str, usize), b: (Answer, &str, usize)) -> bool {
+/// **ここまで見れば同点が無い。** 並べ替えが安定かどうかに結果が依らない
+/// ので、不安定なアルゴリズムを使ってもよい。
+const fn before(a: (Answer, &str, usize), b: (Answer, &str, usize)) -> bool {
     let (la, lb) = (char_count(a.1), char_count(b.1));
     if la != lb {
-        la < lb
+        la > lb
     } else {
-        a.2 > b.2
+        a.2 < b.2
     }
 }
 
@@ -137,17 +139,9 @@ const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
         i += 1;
     }
 
-    let mut i = 1;
-    while i < CANDIDATE_COUNT {
-        let mut j = i;
-        while j > 0 && after(buf[j - 1], buf[j]) {
-            let swap = buf[j - 1];
-            buf[j - 1] = buf[j];
-            buf[j] = swap;
-            j -= 1;
-        }
-        i += 1;
-    }
+    // 配列を渡すと**その場では並べ替えず、並べ替えたものを返す**。
+    // 戻り値を捨てると黙って未整列のまま進むので、必ず受け直すこと。
+    let buf = const_quicksort!(buf, |a, b| before(*a, *b));
 
     // 並べ終わったら位置は要らない。
     let mut out = [(Answer::All, ""); CANDIDATE_COUNT];
