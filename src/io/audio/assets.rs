@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 #[cfg(feature = "embed-audio")]
 use const_for::const_for;
 
-use crate::app::cue::Cue;
+use crate::app::Cue;
 
 use super::Clip;
 use crate::config::Config;

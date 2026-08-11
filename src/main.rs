@@ -158,7 +158,7 @@ fn main() -> Result<()> {
             drop(alive);
         });
         // ウィンドウを閉じたらプロセスごと終わる。
-        let closed = io::screen::window::run(rx, again_tx);
+        let closed = io::screen::run(rx, again_tx);
         if let Err(e) = &closed {
             eprintln!("エラー: {e:#}");
         }

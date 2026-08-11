@@ -2,7 +2,7 @@
 
 use strum::VariantArray;
 
-use crate::app::color::Color;
+use crate::app::Color;
 
 use crate::app::{Frame, Screen};
 

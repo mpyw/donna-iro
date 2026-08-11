@@ -28,11 +28,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use strum::EnumCount;
 
-use crate::app::color::{Answer, Color};
-use crate::app::cue::Cue;
 use crate::app::matcher::Matcher;
-use crate::app::Control;
-use crate::app::Player;
+use crate::app::Cue;
+use crate::app::{Answer, Color};
+use crate::app::{Control, Player};
 use crate::app::{Frame, Screen};
 use crate::app::{Heard, Listener};
 use crate::config::Config;
@@ -199,7 +198,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::app::player::Timing;
+    use crate::app::Timing;
     use crate::config::Config;
 
     /// 鳴らした順を記録するだけ。長さ0なので待ち時間が消える。

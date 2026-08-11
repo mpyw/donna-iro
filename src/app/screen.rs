@@ -5,7 +5,7 @@
 
 use strum::EnumCount;
 
-use crate::app::color::Color;
+use crate::app::Color;
 
 /// 今なにを映すか。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

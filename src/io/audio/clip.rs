@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use rodio::Source;
 
-use crate::app::cue::Cue;
+use crate::app::Cue;
 
 use super::{assets::Media, SILENCE};
 

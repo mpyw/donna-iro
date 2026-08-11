@@ -15,7 +15,7 @@ use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 
 use strum::VariantArray;
 
-use crate::app::color::{Color, Rgb};
+use crate::app::{Color, Rgb};
 use crate::app::{Frame, Screen};
 
 const WIDTH: usize = 1280;

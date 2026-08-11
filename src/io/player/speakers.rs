@@ -2,9 +2,9 @@
 
 use anyhow::{Context, Result};
 
-use crate::app::cue::Cue;
-use crate::app::player::Timing;
+use crate::app::Cue;
 use crate::app::Player;
+use crate::app::Timing;
 use crate::io::audio::Clip;
 
 /// 出力ストリームを持ち回す。再生のたびに開き直すと

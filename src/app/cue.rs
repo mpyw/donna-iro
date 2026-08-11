@@ -5,7 +5,7 @@
 
 use strum::{EnumCount, VariantArray};
 
-use crate::app::color::Color;
+use crate::app::Color;
 use const_for::const_for;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]

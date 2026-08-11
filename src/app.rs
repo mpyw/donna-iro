@@ -11,20 +11,21 @@
 //! 唯一の例外は時間。`game` は `Instant::now` と `sleep` を使う。装置や
 //! ファイルは触らないので、ここでは純粋として扱う。
 
-pub mod color;
+mod color;
 mod control;
-pub mod cue;
+mod cue;
 mod game;
 mod listener;
 mod matcher;
-pub mod player;
+mod player;
 mod screen;
 
-// 遊びの口。`main` と `io` はこの4つを見れば繋げられるので、
-// モジュールを辿らずに書けるようにしておく。
+// 遊びの口。`main` と `io` はここだけ見れば繋げられるので、モジュールを
+// 辿らずに書けるようにしておく。**中の割り方を外に見せない。**
+pub use color::{Answer, Color, Rgb};
 pub use control::Control;
-pub use listener::{Heard, Listener};
-pub use player::Player;
-pub use screen::{Frame, Screen};
-
+pub use cue::Cue;
 pub use game::Game;
+pub use listener::{Heard, Listener};
+pub use player::{Player, Timing};
+pub use screen::{Frame, Screen};
