@@ -67,35 +67,22 @@ impl Ears {
         let fault = Arc::new(Mutex::new(None::<String>));
 
         // チャンネルを混ぜてモノラルにしながら溜める。
-        macro_rules! sink {
-            ($t:ty, $conv:expr) => {{
-                let buf = Arc::clone(&buf);
-                let conv: fn($t) -> f32 = $conv;
-                // 壊れたら残す。読むのは listen() の入口と出口。
-                let broke = Arc::clone(&fault);
-                let err = move |e: cpal::StreamError| {
-                    eprintln!("入力ストリームのエラー: {e}");
-                    broke.lock().unwrap().get_or_insert_with(|| e.to_string());
-                };
-                device.build_input_stream(
-                    &config,
-                    move |data: &[$t], _: &cpal::InputCallbackInfo| {
-                        let mut b = buf.lock().unwrap();
-                        for frame in data.chunks(channels) {
-                            b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
-                        }
-                        trim(&mut b, cap);
-                    },
-                    err,
-                    None,
-                )?
-            }};
-        }
-
+        // **サンプルの型ごとに呼び分ける。** クロージャで束ねようとすると
+        // 最初の型に固定されてしまうので、関数をそのまま呼ぶ。
+        let sink = Sink {
+            channels,
+            cap,
+            buf: &buf,
+            fault: &fault,
+        };
         let stream = match format {
-            cpal::SampleFormat::F32 => sink!(f32, |s| s),
-            cpal::SampleFormat::I16 => sink!(i16, |s| s as f32 / i16::MAX as f32),
-            cpal::SampleFormat::U16 => sink!(u16, |s| (s as f32 - 32768.0) / 32768.0),
+            cpal::SampleFormat::F32 => sink.open(&device, &config, |s: f32| s)?,
+            cpal::SampleFormat::I16 => {
+                sink.open(&device, &config, |s: i16| s as f32 / i16::MAX as f32)?
+            }
+            cpal::SampleFormat::U16 => {
+                sink.open(&device, &config, |s: u16| (s as f32 - 32768.0) / 32768.0)?
+            }
             other => anyhow::bail!("未対応のサンプル形式: {other:?}"),
         };
         stream.play()?;
@@ -242,6 +229,51 @@ impl Ears {
         });
         self.check_fault()?;
         Ok(out)
+    }
+}
+
+/// 入力ストリームを開くための持ち物。**サンプルの型だけが違う3通りを
+/// 1箇所にまとめる。**
+///
+/// `build_input_stream` はデータのコールバックが型で決まるので、クロージャ
+/// ひとつでは束ねられない（クロージャはジェネリックにできない）。型ごとに
+/// 呼び分けるしかないが、渡すものはどれも同じなので、そちらを持たせる。
+struct Sink<'a> {
+    channels: usize,
+    cap: usize,
+    buf: &'a Arc<Mutex<Vec<f32>>>,
+    fault: &'a Arc<Mutex<Option<String>>>,
+}
+
+impl Sink<'_> {
+    /// チャンネルを混ぜてモノラルにしながら溜める。
+    fn open<T>(
+        &self,
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        conv: fn(T) -> f32,
+    ) -> Result<cpal::Stream>
+    where
+        T: cpal::SizedSample + Send + 'static,
+    {
+        let (buf, channels, cap) = (Arc::clone(self.buf), self.channels, self.cap);
+        // 壊れたら残す。読むのは listen() の入口と出口。
+        let broke = Arc::clone(self.fault);
+        Ok(device.build_input_stream(
+            config,
+            move |data: &[T], _: &cpal::InputCallbackInfo| {
+                let mut b = buf.lock().unwrap();
+                for frame in data.chunks(channels) {
+                    b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
+                }
+                trim(&mut b, cap);
+            },
+            move |e| {
+                eprintln!("入力ストリームのエラー: {e}");
+                broke.lock().unwrap().get_or_insert_with(|| e.to_string());
+            },
+            None,
+        )?)
     }
 }
 
