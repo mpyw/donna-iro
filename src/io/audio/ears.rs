@@ -33,11 +33,15 @@ pub struct Ears {
 
 impl Ears {
     pub fn new(cfg: &Config) -> Result<Self> {
-        let device = cpal::default_host()
-            .default_input_device()
-            .context("入力デバイスがない")?;
+        let device = input_device(&cfg.listen)?;
         let supported = device.default_input_config()?;
         let rate = supported.sample_rate().0;
+        eprintln!(
+            "  マイク {}（{} ch / {} Hz）",
+            device.name().unwrap_or_else(|_| "?".into()),
+            supported.channels(),
+            rate
+        );
         let channels = supported.channels() as usize;
         let format = supported.sample_format();
         let config: cpal::StreamConfig = supported.into();
@@ -217,4 +221,36 @@ fn resample(src: &[f32], from: u32, to: u32) -> Vec<f32> {
             a + (b - a) * frac
         })
         .collect()
+}
+
+/// 使う入力デバイスを決める。
+///
+/// **見つからなければ既定に落とさず、そこで止める。** 黙って内蔵マイクに
+/// 落ちるのが一番たちが悪い。名前を指定したのに違うマイクで動いていて、
+/// 精度が出ない理由が分からなくなる。
+fn input_device(cfg: &Listen) -> Result<cpal::Device> {
+    let host = cpal::default_host();
+    let Some(want) = cfg.device() else {
+        return host.default_input_device().context("入力デバイスがない");
+    };
+    let found = host
+        .input_devices()?
+        .find(|d| d.name().is_ok_and(|name| name.contains(want)));
+    match found {
+        Some(device) => Ok(device),
+        None => {
+            let names: Vec<String> = host
+                .input_devices()?
+                .filter_map(|d| d.name().ok())
+                .collect();
+            anyhow::bail!(
+                "入力デバイスが見つからない: {want}\n  見えているもの: {}",
+                if names.is_empty() {
+                    "（無し）".to_string()
+                } else {
+                    names.join(" / ")
+                }
+            )
+        }
+    }
 }
