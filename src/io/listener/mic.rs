@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use super::Listener;
-use crate::audio::{Ears, WHISPER_SR};
-use crate::color::Answer;
-use crate::config::Config;
+use crate::app::color::Answer;
+use crate::app::Config;
+use crate::app::Listener;
+use crate::io::audio::{Ears, WHISPER_SR};
 use const_for::const_for;
 
 /// モデルも状態も起動時に一度だけ作る。

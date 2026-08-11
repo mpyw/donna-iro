@@ -10,29 +10,18 @@
 //!
 //! 設定は `config.toml` に集約してある。何をいじれるかはそのファイルを見ること。
 
-mod audio;
-mod color;
-mod config;
-mod control;
-mod cue;
-mod game;
-mod listener;
-mod matcher;
-mod player;
-mod screen;
+mod app;
+mod io;
 
 use anyhow::Result;
 
-use control::Control;
-use game::Game;
-use listener::Listener;
-use screen::Screen;
+use app::{Control, Game, Listener, Screen};
 
 struct Options {
     keyboard: bool,
     terminal: bool,
     once: bool,
-    config: config::Config,
+    config: app::Config,
 }
 
 fn main() -> Result<()> {
@@ -46,19 +35,19 @@ fn main() -> Result<()> {
         keyboard: args.iter().any(|a| a == "--keyboard"),
         terminal: args.iter().any(|a| a == "--terminal") || cfg!(not(feature = "window")),
         once: args.iter().any(|a| a == "--once"),
-        config: config::Config::load(explicit.as_deref())?,
+        config: io::config::load(explicit.as_deref())?,
     };
 
     // 遊んでいる最中に落ちないよう、素材は先に確かめる。
-    audio::check_assets(&opts.config)?;
+    io::audio::check_assets(&opts.config)?;
 
     if opts.terminal {
         let control: Box<dyn Control> = if opts.once {
-            Box::new(control::never::Never)
+            Box::new(io::control::Never)
         } else {
-            Box::new(control::stdin::Stdin)
+            Box::new(io::control::Stdin)
         };
-        return play(opts, Box::new(screen::terminal::Terminal), control);
+        return play(opts, Box::new(io::screen::Terminal), control);
     }
 
     #[cfg(feature = "window")]
@@ -71,18 +60,18 @@ fn main() -> Result<()> {
         let (again_tx, again_rx) = std::sync::mpsc::channel();
         let control: Box<dyn Control> = if opts.once {
             drop(again_rx);
-            Box::new(control::never::Never)
+            Box::new(io::control::Never)
         } else {
-            Box::new(control::channel::Channel(again_rx))
+            Box::new(io::control::Channel(again_rx))
         };
         std::thread::spawn(move || {
-            if let Err(e) = play(opts, Box::new(screen::window::Remote(tx)), control) {
+            if let Err(e) = play(opts, Box::new(io::screen::Remote(tx)), control) {
                 eprintln!("エラー: {e:#}");
             }
             // ここで送信側が落ちるので、ウィンドウ側のループも抜ける。
         });
         // ウィンドウを閉じたらプロセスごと終わる。
-        let closed = screen::window::run(rx, again_tx);
+        let closed = io::screen::window::run(rx, again_tx);
         if let Err(e) = &closed {
             eprintln!("エラー: {e:#}");
         }
@@ -117,7 +106,7 @@ fn quit(code: i32) -> ! {
 }
 
 fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Result<()> {
-    let player = Box::new(audio::Speakers::new()?);
+    let player = Box::new(io::player::Speakers::new()?);
     let ears = open_ears(&opts)?;
     Game::new(player, ears, screen, control, &opts.config).run()
 }
@@ -125,13 +114,13 @@ fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Re
 #[cfg(feature = "whisper")]
 fn open_ears(opts: &Options) -> Result<Box<dyn Listener>> {
     if opts.keyboard {
-        return Ok(Box::new(listener::keyboard::Keyboard));
+        return Ok(Box::new(io::listener::Keyboard));
     }
-    let ears = audio::Ears::new(&opts.config)?;
-    Ok(Box::new(listener::mic::Mic::new(ears, &opts.config)?))
+    let ears = io::audio::Ears::new(&opts.config)?;
+    Ok(Box::new(io::listener::Mic::new(ears, &opts.config)?))
 }
 
 #[cfg(not(feature = "whisper"))]
 fn open_ears(_opts: &Options) -> Result<Box<dyn Listener>> {
-    Ok(Box::new(listener::keyboard::Keyboard))
+    Ok(Box::new(io::listener::Keyboard))
 }

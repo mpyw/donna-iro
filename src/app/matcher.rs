@@ -21,7 +21,7 @@
 
 use sort_const::const_quicksort;
 
-use crate::color::Answer;
+use crate::app::color::Answer;
 use const_for::const_for;
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
@@ -417,7 +417,7 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::color::Color;
+    use crate::app::color::Color;
 
     use super::*;
 

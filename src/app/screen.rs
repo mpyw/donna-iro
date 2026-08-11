@@ -1,18 +1,11 @@
 //! 色をどこに出すか。
 //!
-//! `Screen` トレイトと、その実装。本命はウィンドウ（`window`）で、
-//! テレビに映して2歳児に見せるものはこちら。ターミナルは動作確認用に
-//! 色名を出すだけに留める。
-
-/// 色名を出すだけの実装。動作確認用。
-pub mod terminal;
-/// ウィンドウ描画。テレビに映すのはこちらが本命。
-#[cfg(feature = "window")]
-pub mod window;
+//! 何を映すか（`Frame`）と、映す先の口（`Screen`）だけ。実際に描くのは
+//! `io::screen` で、本命はウィンドウ、ターミナルは動作確認用。
 
 use strum::EnumCount;
 
-use crate::color::Color;
+use crate::app::color::Color;
 
 /// 今なにを映すか。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

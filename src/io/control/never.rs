@@ -1,6 +1,6 @@
 //! 待たずに終わる実装。`--once`。
 
-use super::Control;
+use crate::app::Control;
 
 /// 待たずに終わる（`--once`）。フィナーレで止まる、以前の挙動。
 pub struct Never;

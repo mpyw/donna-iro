@@ -10,7 +10,7 @@
 
 use anyhow::Result;
 
-use crate::cue::Cue;
+use crate::app::cue::Cue;
 
 /// 素材の長さ。
 pub struct Timing {
