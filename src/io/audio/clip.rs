@@ -5,9 +5,9 @@ use std::time::Duration;
 use anyhow::Result;
 use rodio::Source;
 
+use super::assets::Media;
+use super::SILENCE;
 use crate::app::Cue;
-
-use super::{assets::Media, SILENCE};
 
 /// 復号済みの音。長さと末尾の無音を測るために一度メモリに載せる。
 pub struct Clip {

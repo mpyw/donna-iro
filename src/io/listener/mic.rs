@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::app::Answer;
-use crate::app::{Heard, Listener};
+use crate::app::{Answer, Heard, Listener};
 use crate::config::Config;
 use crate::io::audio::{Ears, WHISPER_SR};
 

@@ -3,10 +3,10 @@
 //! 文字列で指すと綴り間違いがビルドを通ってしまうので型にする。
 //! `every()` に並べてあるものが、そのまま埋め込みビルドの対象になる。
 
+use const_for::const_for;
 use strum::{EnumCount, VariantArray};
 
 use crate::app::Color;
-use const_for::const_for;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
 pub enum Cue {

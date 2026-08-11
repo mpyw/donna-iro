@@ -9,9 +9,8 @@ use anyhow::{Context, Result};
 #[cfg(feature = "embed-audio")]
 use const_for::const_for;
 
-use crate::app::Cue;
-
 use super::Clip;
+use crate::app::Cue;
 use crate::config::Config;
 
 /// ファイルから読むか、バイナリに埋め込んだものを読むか。

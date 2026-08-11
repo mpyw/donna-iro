@@ -16,7 +16,6 @@ mod config;
 mod io;
 
 use anyhow::{Context, Result};
-
 use app::{Control, Game, Listener, Screen};
 
 struct Options {
@@ -280,8 +279,9 @@ mod tests {
 
 #[cfg(all(test, feature = "window"))]
 mod exit_tests {
-    use super::exit_code;
     use std::sync::mpsc::TryRecvError::{Disconnected, Empty};
+
+    use super::exit_code;
 
     /// **ここが0を返すと障害が成功に見える。** テレビに繋ぎっぱなしの玩具は
     /// systemd の再起動条件しか自分を直す手立てが無いので、終了コードを

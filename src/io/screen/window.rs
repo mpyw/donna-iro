@@ -12,11 +12,9 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
-
 use strum::VariantArray;
 
-use crate::app::{Color, Rgb};
-use crate::app::{Frame, Screen};
+use crate::app::{Color, Frame, Rgb, Screen};
 
 const WIDTH: usize = 1280;
 const HEIGHT: usize = 720;

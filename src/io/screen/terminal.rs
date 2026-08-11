@@ -2,9 +2,7 @@
 
 use strum::VariantArray;
 
-use crate::app::Color;
-
-use crate::app::{Frame, Screen};
+use crate::app::{Color, Frame, Screen};
 
 /// 色名を出すだけ。動作確認用。
 ///

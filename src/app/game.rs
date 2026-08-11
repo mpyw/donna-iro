@@ -29,11 +29,7 @@ use anyhow::Result;
 use strum::EnumCount;
 
 use crate::app::matcher::Matcher;
-use crate::app::Cue;
-use crate::app::{Answer, Color};
-use crate::app::{Control, Player};
-use crate::app::{Frame, Screen};
-use crate::app::{Heard, Listener};
+use crate::app::{Answer, Color, Control, Cue, Frame, Heard, Listener, Player, Screen};
 use crate::config::Config;
 
 pub struct Game {
@@ -191,13 +187,12 @@ fn shuffle(prev: &[Color; Color::COUNT]) -> [Color; Color::COUNT] {
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray;
-
-    use super::*;
-
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    use strum::VariantArray;
+
+    use super::*;
     use crate::app::Timing;
     use crate::config::Config;
 

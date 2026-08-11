@@ -308,6 +308,17 @@ macOS ではウィンドウをメインスレッドに置く必要があり、`c
 | | |
 | --- | --- |
 | `tools/check.sh` | 全 feature の組み合わせでコンパイル・テスト・書式と、ラズパイ側の依存を確かめる |
+
+`use` の粒度と並びは `rustfmt.toml` で決めているが、**どちらの設定も nightly で
+しか効かない**。安定版の `cargo fmt` は警告を出して素通りするだけなので、整形
+そのものは壊れない。揃えたいときは:
+
+```
+rustup toolchain install nightly --profile minimal --component rustfmt
+RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt
+```
+
+`tools/check.sh` は nightly が入っていればそちらで見る。
 | `tools/fetch-model.sh` | whisper のモデルを取得 |
 | `tools/bundle-mac.sh` | macOS の `.app` を作る（Metal + 埋め込み） |
 | `tools/split_score.py` | 元譜面から素材ごとの MusicXML を切り出す |
