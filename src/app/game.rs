@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use strum::EnumCount;
 
-use crate::app::matcher::Matcher;
+// `crate::app::` で来るものが `app` の外向きの顔。`Matcher` はここでしか
+// 使わない裏方なので、再エクスポートせず兄弟のまま参照する。
+use super::matcher::Matcher;
 use crate::app::{Answer, Color, Control, Cue, Frame, Heard, Listener, Player, Screen};
 use crate::config::Config;
 
