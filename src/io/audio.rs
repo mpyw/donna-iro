@@ -4,12 +4,12 @@
 //! cpal も rodio もクロスプラットフォームで、macOS では CoreAudio、
 //! Raspberry Pi では ALSA を裏で使う。ソースは共通のままでよい。
 
-pub mod assets;
-pub mod clip;
-pub mod ears;
+mod assets;
+mod clip;
+mod ears;
 
 pub use assets::check_assets;
-pub(crate) use clip::Clip;
+pub use clip::Clip;
 pub use ears::Ears;
 
 /// whisper が受け取るサンプリングレート。

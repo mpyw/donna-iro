@@ -9,19 +9,19 @@ use anyhow::{Context, Result};
 #[cfg(feature = "embed-audio")]
 use const_for::const_for;
 
-use crate::app::config::Config;
 use crate::app::cue::Cue;
+use crate::app::Config;
 
 /// ファイルから読むか、バイナリに埋め込んだものを読むか。
 /// `rodio::Decoder` に渡すため、どちらも同じ型にまとめる。
-pub(crate) enum Media {
+pub enum Media {
     File(BufReader<File>),
     #[cfg(feature = "embed-audio")]
     Memory(std::io::Cursor<&'static [u8]>),
 }
 
 impl Media {
-    pub(crate) fn open(cue: Cue) -> Result<Self> {
+    pub fn open(cue: Cue) -> Result<Self> {
         let stem = cue.stem();
 
         // 埋め込みがあり、かつディレクトリ指定で上書きされていなければ

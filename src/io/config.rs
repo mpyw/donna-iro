@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use figment::providers::{Env, Format, Serialized, Toml};
 use figment::Figment;
 
-use crate::app::config::Config;
+use crate::app::Config;
 
 /// 環境変数の接頭辞。
 const PREFIX: &str = "DONNA_IRO_";

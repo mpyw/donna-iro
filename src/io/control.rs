@@ -1,6 +1,11 @@
 //! `Control` の実装。
 
 #[cfg(feature = "window")]
-pub mod channel;
-pub mod never;
-pub mod stdin;
+mod channel;
+mod never;
+mod stdin;
+
+#[cfg(feature = "window")]
+pub use channel::Channel;
+pub use never::Never;
+pub use stdin::Stdin;

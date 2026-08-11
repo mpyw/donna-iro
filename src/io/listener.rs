@@ -1,5 +1,9 @@
 //! `Listener` の実装。
 
-pub mod keyboard;
+mod keyboard;
 #[cfg(feature = "whisper")]
-pub mod mic;
+mod mic;
+
+pub use keyboard::Keyboard;
+#[cfg(feature = "whisper")]
+pub use mic::Mic;

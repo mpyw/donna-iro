@@ -1,3 +1,5 @@
 //! `Player` の実装。
 
-pub mod speakers;
+mod speakers;
+
+pub use speakers::Speakers;

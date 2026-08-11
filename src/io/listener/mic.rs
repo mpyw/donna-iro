@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::app::color::Answer;
-use crate::app::config::Config;
-use crate::app::listener::Listener;
+use crate::app::Config;
+use crate::app::Listener;
 use crate::io::audio::{Ears, WHISPER_SR};
 use const_for::const_for;
 

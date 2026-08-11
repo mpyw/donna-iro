@@ -15,16 +15,13 @@ mod io;
 
 use anyhow::Result;
 
-use app::control::Control;
-use app::game::Game;
-use app::listener::Listener;
-use app::screen::Screen;
+use app::{Control, Game, Listener, Screen};
 
 struct Options {
     keyboard: bool,
     terminal: bool,
     once: bool,
-    config: app::config::Config,
+    config: app::Config,
 }
 
 fn main() -> Result<()> {
@@ -46,11 +43,11 @@ fn main() -> Result<()> {
 
     if opts.terminal {
         let control: Box<dyn Control> = if opts.once {
-            Box::new(io::control::never::Never)
+            Box::new(io::control::Never)
         } else {
-            Box::new(io::control::stdin::Stdin)
+            Box::new(io::control::Stdin)
         };
-        return play(opts, Box::new(io::screen::terminal::Terminal), control);
+        return play(opts, Box::new(io::screen::Terminal), control);
     }
 
     #[cfg(feature = "window")]
@@ -63,12 +60,12 @@ fn main() -> Result<()> {
         let (again_tx, again_rx) = std::sync::mpsc::channel();
         let control: Box<dyn Control> = if opts.once {
             drop(again_rx);
-            Box::new(io::control::never::Never)
+            Box::new(io::control::Never)
         } else {
-            Box::new(io::control::channel::Channel(again_rx))
+            Box::new(io::control::Channel(again_rx))
         };
         std::thread::spawn(move || {
-            if let Err(e) = play(opts, Box::new(io::screen::window::Remote(tx)), control) {
+            if let Err(e) = play(opts, Box::new(io::screen::Remote(tx)), control) {
                 eprintln!("エラー: {e:#}");
             }
             // ここで送信側が落ちるので、ウィンドウ側のループも抜ける。
@@ -109,7 +106,7 @@ fn quit(code: i32) -> ! {
 }
 
 fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Result<()> {
-    let player = Box::new(io::player::speakers::Speakers::new()?);
+    let player = Box::new(io::player::Speakers::new()?);
     let ears = open_ears(&opts)?;
     Game::new(player, ears, screen, control, &opts.config).run()
 }
@@ -117,13 +114,13 @@ fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Re
 #[cfg(feature = "whisper")]
 fn open_ears(opts: &Options) -> Result<Box<dyn Listener>> {
     if opts.keyboard {
-        return Ok(Box::new(io::listener::keyboard::Keyboard));
+        return Ok(Box::new(io::listener::Keyboard));
     }
     let ears = io::audio::Ears::new(&opts.config)?;
-    Ok(Box::new(io::listener::mic::Mic::new(ears, &opts.config)?))
+    Ok(Box::new(io::listener::Mic::new(ears, &opts.config)?))
 }
 
 #[cfg(not(feature = "whisper"))]
 fn open_ears(_opts: &Options) -> Result<Box<dyn Listener>> {
-    Ok(Box::new(io::listener::keyboard::Keyboard))
+    Ok(Box::new(io::listener::Keyboard))
 }

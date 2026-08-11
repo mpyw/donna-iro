@@ -4,7 +4,7 @@ use strum::VariantArray;
 
 use crate::app::color::Color;
 
-use crate::app::screen::{Frame, Screen};
+use crate::app::{Frame, Screen};
 
 /// 色名を出すだけ。動作確認用。
 ///

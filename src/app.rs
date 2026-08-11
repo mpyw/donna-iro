@@ -13,10 +13,20 @@
 
 pub mod color;
 pub mod config;
-pub mod control;
+mod control;
 pub mod cue;
-pub mod game;
-pub mod listener;
-pub mod matcher;
+mod game;
+mod listener;
+mod matcher;
 pub mod player;
-pub mod screen;
+mod screen;
+
+// 遊びの口。`main` と `io` はこの4つを見れば繋げられるので、
+// モジュールを辿らずに書けるようにしておく。
+pub use control::Control;
+pub use listener::Listener;
+pub use player::Player;
+pub use screen::{Frame, Screen};
+
+pub use config::Config;
+pub use game::Game;

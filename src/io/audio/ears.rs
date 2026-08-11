@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::app::config::{Config, Listen};
+use crate::app::config::Listen;
+use crate::app::Config;
 
 use super::WHISPER_SR;
 

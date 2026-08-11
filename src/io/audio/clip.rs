@@ -10,14 +10,14 @@ use crate::app::cue::Cue;
 use super::{assets::Media, SILENCE};
 
 /// 復号済みの音。長さと末尾の無音を測るために一度メモリに載せる。
-pub(crate) struct Clip {
+pub struct Clip {
     samples: Vec<f32>,
     channels: u16,
     rate: u32,
 }
 
 impl Clip {
-    pub(crate) fn load(cue: Cue) -> Result<Self> {
+    pub fn load(cue: Cue) -> Result<Self> {
         let decoder = rodio::Decoder::new(Media::open(cue)?)?;
         let channels = decoder.channels();
         let rate = decoder.sample_rate();
@@ -33,12 +33,12 @@ impl Clip {
         Duration::from_secs_f64(n as f64 / self.rate as f64)
     }
 
-    pub(crate) fn total(&self) -> Duration {
+    pub fn total(&self) -> Duration {
         self.frames(self.samples.len() / self.channels as usize)
     }
 
     /// 末尾の無音を除いた長さ。
-    pub(crate) fn audible(&self) -> Duration {
+    pub fn audible(&self) -> Duration {
         let last = self
             .samples
             .iter()
@@ -48,7 +48,7 @@ impl Clip {
         self.frames(last)
     }
 
-    pub(crate) fn into_source(self) -> rodio::buffer::SamplesBuffer<f32> {
+    pub fn into_source(self) -> rodio::buffer::SamplesBuffer<f32> {
         rodio::buffer::SamplesBuffer::new(self.channels, self.rate, self.samples)
     }
 }
