@@ -6,13 +6,17 @@
 
 mod assets;
 mod clip;
+/// 録音は whisper のときだけ要る。手打ちのビルドではまるごと不要。
+#[cfg(feature = "whisper")]
 mod ears;
 
-pub use assets::check_assets;
+pub use assets::configure;
 pub use clip::Clip;
+#[cfg(feature = "whisper")]
 pub use ears::Ears;
 
 /// whisper が受け取るサンプリングレート。
+#[cfg(feature = "whisper")]
 pub const WHISPER_SR: u32 = 16_000;
 
 /// これを下回れば無音とみなす振幅。再生側の末尾検出と録音側の

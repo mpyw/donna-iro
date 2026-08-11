@@ -32,7 +32,7 @@ model = ""
 #
 # 見えているデバイス名は、起動時に出る「マイク ...」の行で分かる。
 #   DONNA_IRO_LISTEN__DEVICE
-device = ""
+device = "Nuroum"
 
 # 応答を待つ上限（秒）。2歳児は考えてから言うので短すぎると取りこぼす。
 #   DONNA_IRO_LISTEN__MAX_SECONDS

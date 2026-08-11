@@ -100,7 +100,7 @@ impl Ears {
         Ok(ears)
     }
 
-    fn threshold(&self) -> f32 {
+    pub fn threshold(&self) -> f32 {
         if self.cfg.threshold > 0.0 {
             return self.cfg.threshold;
         }

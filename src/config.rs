@@ -45,10 +45,10 @@ pub struct Config {
 pub struct Paths {
     /// 音源のディレクトリ。空なら自動（`assets/` が揃っていればそれ、
     /// なければ `assets/reference/`）。
-    pub assets: String,
+    assets: String,
     /// whisper のモデル。埋め込みビルドでもこれが指定されていれば
     /// ファイルから読む。
-    pub model: String,
+    model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,13 +57,13 @@ pub struct Listen {
     /// 使う入力デバイス。名前の一部で選ぶ。空なら OS の既定。
     pub device: String,
     /// 応答を待つ上限（秒）。
-    pub max_seconds: f32,
+    max_seconds: f32,
     /// 声が途切れてから打ち切るまでの猶予（ミリ秒）。
-    pub hangover_ms: u64,
+    hangover_ms: u64,
     /// 窓を開けた直後、スピーカーの残響を無視する時間（ミリ秒）。
-    pub guard_ms: u64,
+    guard_ms: u64,
     /// これだけ続けて初めて「聞こえた」とみなす（ミリ秒）。
-    pub min_speech_ms: u64,
+    min_speech_ms: u64,
     /// 環境ノイズの何倍を発話とみなすか。
     pub speech_ratio: f32,
     /// しきい値の下限。
@@ -89,7 +89,7 @@ pub struct Game {
     /// 何周に1回、区切り（ブリッジまたは間奏）を挟むか。
     pub insert_every: u32,
     /// フィナーレで色を差し替える間隔（ミリ秒）。
-    pub flash_ms: u64,
+    flash_ms: u64,
 }
 
 impl Default for Listen {
