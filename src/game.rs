@@ -26,15 +26,15 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use strum::{EnumCount, VariantArray};
+use strum::EnumCount;
 
 use crate::audio::Player;
-use crate::color::Color;
+use crate::color::{Answer, Color};
 use crate::config::Config;
 use crate::control::Control;
 use crate::cue::Cue;
 use crate::listener::Listener;
-use crate::matcher::{Answer, Matcher};
+use crate::matcher::Matcher;
 use crate::screen::{Frame, Screen};
 
 pub struct Game {
@@ -115,7 +115,7 @@ impl Game {
             // 聞き取れなければランダムな色。黙ってはいけない。
             // ここで All に倒してはならない。事故で終わってしまう。
             let color = match answer {
-                Some(Answer::Color(c)) => c,
+                Some(Answer::Single(c)) => c,
                 _ => Color::random(),
             };
             self.screen.show(Frame::Single(color));
@@ -185,6 +185,8 @@ fn shuffle(prev: &[Color; Color::COUNT]) -> [Color; Color::COUNT] {
 
 #[cfg(test)]
 mod tests {
+    use strum::VariantArray;
+
     use super::*;
 
     #[test]

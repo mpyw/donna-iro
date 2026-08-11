@@ -1,6 +1,9 @@
-//! 認識対象の色。
+//! 認識対象の色と、子どもの応答。
 //!
-//! 語彙をここに閉じることで、汎用 ASR に頼らずとも判定できるようにする。
+//! **語彙をここに閉じることで、汎用 ASR に頼らずとも判定できるようにする。**
+//! 「ぜんぶ」だけ `matcher.rs` に定数で置いていた頃は、この方針から漏れて
+//! いて、語彙を使う側（判定と `initial_prompt`）の両方に手で足していた。
+//! 色と同じ `Answer` に収めたので、どちらも同じ一覧を見るだけで済む。
 //!
 //! **色ごとの情報は下の定義に1箇所でまとめて書く。** 読み・漢字・RGB・表示名を
 //! 別々の `match` に散らしていた頃は、色を足すたびに5箇所を回る必要があり、
@@ -211,6 +214,55 @@ impl Color {
     pub fn random() -> Color {
         use rand::seq::SliceRandom;
         *Color::VARIANTS.choose(&mut rand::thread_rng()).unwrap()
+    }
+}
+
+/// 子どもの応答。**この遊びの語彙そのもの。**
+///
+/// 判定の候補も `initial_prompt` に渡す語彙も、どちらもここから作る。
+/// 「ぜんぶ」を色とは別の定数として持っていた頃は、増やすときに
+/// `Matcher` と `Listener` の両方へ手で足す必要があった。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// 色を答えた。ループを続ける。
+    Single(Color),
+    /// 「ぜんぶ！」と答えた。転調してエンディングへ向かう。
+    All,
+}
+
+impl Answer {
+    pub const COUNT: usize = Color::COUNT + 1;
+
+    /// 語彙の全体。色のうしろに「ぜんぶ」がひとつ。
+    ///
+    /// 並びは候補の優先順位に効く（同じ長さなら先に入れたほうが勝つ）。
+    /// 「ぜんぶ」を末尾に置いてあるのは、同じ3文字の色名を押しのけない
+    /// ようにするため。
+    pub const fn every() -> [Answer; Self::COUNT] {
+        let mut out = [Answer::All; Self::COUNT];
+        let mut i = 0;
+        while i < Color::COUNT {
+            out[i] = Answer::Single(Color::VARIANTS[i]);
+            i += 1;
+        }
+        out
+    }
+
+    /// 認識結果にマッチさせる読み。ひらがなの正式形をひとつだけ。
+    pub const fn reading(&self) -> &'static str {
+        match self {
+            Answer::Single(c) => c.reading(),
+            Answer::All => "ぜんぶ",
+        }
+    }
+
+    /// 漢字表記。`initial_prompt` は誘導であって強制ではないので、
+    /// whisper は漢字を返すことがある。実際に「全部」が出た。
+    pub const fn kanji(&self) -> Option<&'static str> {
+        match self {
+            Answer::Single(c) => c.kanji(),
+            Answer::All => Some("全部"),
+        }
     }
 }
 

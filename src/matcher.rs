@@ -19,24 +19,7 @@
 //!
 //! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
-use strum::VariantArray;
-
-use crate::color::Color;
-
-/// 子どもの応答。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Answer {
-    /// 色を答えた。ループを続ける。
-    Color(Color),
-    /// 「ぜんぶ！」と答えた。転調してエンディングへ向かう。
-    All,
-}
-
-/// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
-pub const ALL_READING: &str = "ぜんぶ";
-/// 同じものの漢字表記。`initial_prompt` は誘導であって強制ではないので、
-/// whisper は漢字を返すことがある。実際に「全部」が出た。
-const ALL_KANJI: &str = "全部";
+use crate::color::Answer;
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -55,8 +38,8 @@ const PROMPT: &[&str] = &["どんないろがすき", "どんないろ", "どん
 fn allowed(answer: Answer, reading_len: usize) -> usize {
     match answer {
         Answer::All => 4,
-        Answer::Color(_) if reading_len <= 2 => 4,
-        Answer::Color(_) => 6,
+        Answer::Single(_) if reading_len <= 2 => 4,
+        Answer::Single(_) => 6,
     }
 }
 
@@ -90,15 +73,15 @@ pub struct Matcher {
 
 impl Matcher {
     pub fn new(head: usize) -> Self {
+        // 読みを全部入れてから漢字を全部入れる。同じ長さなら読みを先に
+        // 当てたいので、混ぜずに二周する。
         let mut candidates: Vec<(Answer, String)> = Vec::new();
-        for &c in Color::VARIANTS {
-            candidates.push((Answer::Color(c), normalize(c.reading())));
+        for a in Answer::every() {
+            candidates.push((a, normalize(a.reading())));
         }
-        candidates.push((Answer::All, normalize(ALL_READING)));
-        candidates.push((Answer::All, normalize(ALL_KANJI)));
-        for &c in Color::VARIANTS {
-            if let Some(k) = c.kanji() {
-                candidates.push((Answer::Color(c), normalize(k)));
+        for a in Answer::every() {
+            if let Some(k) = a.kanji() {
+                candidates.push((a, normalize(k)));
             }
         }
         // 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
@@ -367,13 +350,15 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use crate::color::Color;
+
     use super::*;
 
     fn find(s: &str) -> Option<Answer> {
         Matcher::new(2).find(s)
     }
     fn c(x: Color) -> Option<Answer> {
-        Some(Answer::Color(x))
+        Some(Answer::Single(x))
     }
 
     #[test]
