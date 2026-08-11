@@ -193,26 +193,64 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 
 ### 依存の層
 
-**覚える規則はひとつだけ。上の層は、自分より下の層しか読まない。**
+**覚える規則はひとつだけ。矢印はすべて下を向いている。**
 
+```mermaid
+flowchart TD
+    main["main.rs<br/>組み立て"]
+    game["game.rs<br/>進行"]
+    window["window.rs<br/>ウィンドウ描画"]
+    listener["listener.rs<br/>聞き取り"]
+    audio["audio.rs<br/>再生と録音"]
+    matcher["matcher.rs<br/>判定"]
+    control["control.rs<br/>もう1回"]
+    screen["screen.rs<br/>映す先"]
+    cue["cue.rs<br/>鳴らす素材"]
+    color["color.rs<br/>色の定義"]
+    config["config.rs<br/>設定"]
+
+    main --> game
+    main --> window
+    main --> listener
+    main --> audio
+    main --> control
+    main --> screen
+
+    game --> listener
+    game --> audio
+    game --> matcher
+    game --> control
+    game --> screen
+    game --> cue
+
+    listener --> audio
+    listener --> matcher
+    audio --> cue
+    window --> screen
+
+    main -.-> config
+    game -.-> config
+    game -.-> color
+    listener -.-> config
+    listener -.-> color
+    audio -.-> config
+    window -.-> color
+    cue -.-> color
+    matcher -.-> color
+    screen -.-> color
+
+    classDef base fill:#eee,stroke:#999,color:#333;
+    class color,config base;
 ```
-  ↑ 知っていることが多い
-  │
-5 │  main.rs                            組み立て
-4 │  game.rs                            進行
-3 │  listener.rs                        聞き取り
-2 │  audio.rs                           再生と録音
-1 │  cue.rs    matcher.rs   window.rs   素材 / 判定 / 描画
-0 │  color.rs   screen.rs   config.rs   control.rs
-  │
-  ↓ 何も知らない
-```
+
+**点線は、どこからでも読まれる土台（`color.rs` と `config.rs`）への依存。**
+構造を追いたいときは実線だけ見ればよい。
 
 **全部を知っているのは `main.rs` だけ**で、そこから下るほど視野が狭くなる。
-どこを読めばいいか迷ったら、変えたい振る舞いに一番近い層から入って、
+どこを読めばいいか迷ったら、変えたい振る舞いに一番近いところから入って、
 下に降りることはあっても上に戻ることはない、と思ってよい。
 
-正確な辺は次のとおり。
+正確な辺は次のとおり（図が読めない環境向けに、こちらが正）。
 
 | 何が | 何を読むか |
 | --- | --- |
