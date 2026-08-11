@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+#[cfg(feature = "embed-audio")]
+use const_for::const_for;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::Source;
 
@@ -235,35 +237,78 @@ fn complete(dir: &Path) -> bool {
 /// モデルのほうは `embed-model` で埋め込む。両方入れると
 /// バイナリ1つで完結する。
 #[cfg(feature = "embed-audio")]
-fn embedded(stem: &str) -> Option<&'static [u8]> {
-    macro_rules! table {
-        ($($name:literal),* $(,)?) => {
-            &[$(($name, include_bytes!(
-                concat!(env!("CARGO_MANIFEST_DIR"), "/assets/", $name, ".wav")
-            ) as &'static [u8])),*]
-        };
+macro_rules! table {
+    ($($name:literal),* $(,)?) => {
+        &[$(($name, include_bytes!(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/", $name, ".wav")
+        ) as &'static [u8])),*]
+    };
+}
+
+/// 埋め込んだ実体。**名前は手で並べる。**
+///
+/// `include_bytes!` はリテラルのパスしか受け付けないので、`Cue::stem()` の
+/// ように導くことができない。実体が無ければここで落ちるが、素材を足して
+/// ここに書き忘れるほうは下の検査で見る。
+#[cfg(feature = "embed-audio")]
+const FILES: &[(&str, &[u8])] = table![
+    "intro",
+    "question",
+    "tail",
+    "tail-lead",
+    "bridge",
+    "interlude",
+    "all",
+    "red",
+    "blue",
+    "yellow",
+    "green",
+    "yellowgreen",
+    "white",
+    "black",
+    "pink",
+    "orange",
+    "purple",
+    "brown",
+    "lightblue",
+];
+
+/// const で使う文字列の等値。`==` は const で回せない。
+#[cfg(feature = "embed-audio")]
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
     }
-    const FILES: &[(&str, &[u8])] = table![
-        "intro",
-        "question",
-        "tail",
-        "tail-lead",
-        "bridge",
-        "interlude",
-        "all",
-        "red",
-        "blue",
-        "yellow",
-        "green",
-        "yellowgreen",
-        "white",
-        "black",
-        "pink",
-        "orange",
-        "purple",
-        "brown",
-        "lightblue",
-    ];
+    const_for!(i in 0..a.len() => {
+        if a[i] != b[i] {
+            return false;
+        }
+    });
+    true
+}
+
+/// **素材がすべて表に載っているか、コンパイル時に確かめる。**
+///
+/// 実体が無ければ `include_bytes!` がその場で落ちるので、ここで見るのは
+/// 名前の取りこぼしだけ。色を足して上の表に書き忘れると、以前は鳴らそう
+/// とした時点で初めて「埋め込まれていない素材」になっていた。
+#[cfg(feature = "embed-audio")]
+const _: () = {
+    let every = Cue::every();
+    const_for!(i in 0..Cue::COUNT => {
+        let mut found = false;
+        const_for!(j in 0..FILES.len() => {
+            if str_eq(FILES[j].0, every[i].stem()) {
+                found = true;
+            }
+        });
+        assert!(found, "埋め込みの表に無い素材がある（audio.rs の FILES を見ること）");
+    });
+};
+
+#[cfg(feature = "embed-audio")]
+fn embedded(stem: &str) -> Option<&'static [u8]> {
     FILES.iter().find(|(n, _)| *n == stem).map(|(_, b)| *b)
 }
 
