@@ -177,19 +177,24 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 
 ## 構成
 
+**トレイトを持つものは、抽象を親に、実装を子に置く。** 親を見れば何がどう
+抽象化されているかだけが読めて、実装を飛ばさなくてよい。
+
 | | |
 | --- | --- |
-| `color.rs` | 色の定義（読み・RGB・名前・素材名） |
+| `color.rs` | 色の定義（読み・漢字・RGB・名前）と、子どもの応答 `Answer` |
 | `cue.rs` | 鳴らす素材。文字列ではなく型で指す |
 | `matcher.rs` | 応答の判定 |
 | `audio.rs` | 再生（`Player`）と録音（`Ears`）、素材の在処 |
-| `screen.rs` | `Screen` トレイトとターミナル実装 |
-| `window.rs` | ウィンドウ描画。丸と、「もう1回」のボタン（文字含む） |
-| `listener.rs` | `Listener` トレイト、マイク / キーボード |
-| `control.rs` | `Control` トレイト。フィナーレ後の「もう1回」 |
 | `config.rs` | 設定の読み込み（既定 → `config.toml` → 環境変数） |
 | `game.rs` | 進行 |
 | `main.rs` | 組み立て |
+
+| トレイト | 実装 |
+| --- | --- |
+| `screen.rs` — `Frame` と `Screen`。どこに映すか | `screen/terminal.rs` 色名を出すだけ<br>`screen/window.rs` ウィンドウ描画。丸と「もう1回」のボタン |
+| `listener.rs` — `Listener`。色をどう受け取るか | `listener/keyboard.rs` 手打ち<br>`listener/mic.rs` マイクと whisper |
+| `control.rs` — `Control`。「もう1回」をどう受け取るか | `control/channel.rs` ウィンドウ / CEC<br>`control/stdin.rs` ターミナル<br>`control/never.rs` `--once` |
 
 ### 依存の層
 
@@ -200,7 +205,6 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 flowchart TD
     main["main.rs"]
     game["game.rs"]
-    window["window.rs"]
     listener["listener.rs"]
     audio["audio.rs"]
     matcher["matcher.rs"]
@@ -211,7 +215,6 @@ flowchart TD
     config["config.rs"]
 
     main --> game
-    main --> window
     main --> listener
     main --> audio
     main --> control
@@ -226,7 +229,6 @@ flowchart TD
 
     listener --> audio
     audio --> cue
-    window --> screen
 
     main -.-> config
     game -.-> config
@@ -234,7 +236,6 @@ flowchart TD
     listener -.-> config
     listener -.-> color
     audio -.-> config
-    window -.-> color
     cue -.-> color
     matcher -.-> color
     screen -.-> color
@@ -250,15 +251,15 @@ flowchart TD
 どこを読めばいいか迷ったら、変えたい振る舞いに一番近いところから入って、
 下に降りることはあっても上に戻ることはない、と思ってよい。
 
-正確な辺は次のとおり（図が読めない環境向けに、こちらが正）。
+正確な辺は次のとおり（図が読めない環境向けに、こちらが正）。**子モジュールは
+親に畳んである。** 分けたのはファイルの都合で、依存の形は変わらないため。
 
 | 何が | 何を読むか |
 | --- | --- |
-| `main.rs` | `game` `window` `listener` `audio` `control` `screen` `config` |
+| `main.rs` | `game` `listener` `audio` `control` `screen` `config` |
 | `game.rs` | `listener` `audio` `matcher` `control` `screen` `cue` `color` `config` |
 | `listener.rs` | `audio` `color` `config` |
 | `audio.rs` | `cue` `config` |
-| `window.rs` | `screen` `color` |
 | `cue.rs` `matcher.rs` `screen.rs` | `color` |
 | `color.rs` `config.rs` `control.rs` | なし |
 

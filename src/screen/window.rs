@@ -15,8 +15,8 @@ use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 
 use strum::VariantArray;
 
+use super::{Frame, Screen};
 use crate::color::{Color, Rgb};
-use crate::screen::{border, Frame, Screen};
 
 const WIDTH: usize = 1280;
 const HEIGHT: usize = 720;
@@ -248,6 +248,20 @@ fn mix(from: Rgb, to: Rgb, a: f32) -> Rgb {
 fn shaded(c: Rgb, f: f32) -> Rgb {
     let g = |v: u8| (v as f32 * f).clamp(0.0, 255.0) as u8;
     (g(c.0), g(c.1), g(c.2))
+}
+
+/// 枠の色。白と黒が背景に溶けないよう、明るい色は暗く、
+/// 暗い色は明るくずらした縁を描く。
+fn border(c: Rgb) -> Rgb {
+    let lum = 0.299 * c.0 as f32 + 0.587 * c.1 as f32 + 0.114 * c.2 as f32;
+    let f = |v: u8| {
+        if lum < 100.0 {
+            (v as f32 + 90.0).min(255.0) as u8
+        } else {
+            (v as f32 * 0.55) as u8
+        }
+    };
+    (f(c.0), f(c.1), f(c.2))
 }
 
 /// 塗りつぶした丸に、細い縁をつける。
