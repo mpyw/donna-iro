@@ -194,20 +194,21 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 ### 依存の層
 
 **覚える規則はひとつだけ。矢印はすべて下を向いている。**
+どのファイルが何をするかは、すぐ上の表を見ること。
 
 ```mermaid
 flowchart TD
-    main["main.rs<br/>組み立て"]
-    game["game.rs<br/>進行"]
-    window["window.rs<br/>ウィンドウ描画"]
-    listener["listener.rs<br/>聞き取り"]
-    audio["audio.rs<br/>再生と録音"]
-    matcher["matcher.rs<br/>判定"]
-    control["control.rs<br/>もう1回"]
-    screen["screen.rs<br/>映す先"]
-    cue["cue.rs<br/>鳴らす素材"]
-    color["color.rs<br/>色の定義"]
-    config["config.rs<br/>設定"]
+    main["main.rs"]
+    game["game.rs"]
+    window["window.rs"]
+    listener["listener.rs"]
+    audio["audio.rs"]
+    matcher["matcher.rs"]
+    control["control.rs"]
+    screen["screen.rs"]
+    cue["cue.rs"]
+    color["color.rs"]
+    config["config.rs"]
 
     main --> game
     main --> window
