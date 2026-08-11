@@ -18,11 +18,11 @@ mod cue;
 mod game;
 mod listener;
 mod matcher;
+mod player;
 mod screen;
 
 use anyhow::Result;
 
-use audio::Player;
 use control::Control;
 use game::Game;
 use listener::Listener;
@@ -117,7 +117,7 @@ fn quit(code: i32) -> ! {
 }
 
 fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Result<()> {
-    let player = Player::new()?;
+    let player = Box::new(audio::Speakers::new()?);
     let ears = open_ears(&opts)?;
     Game::new(player, ears, screen, control, &opts.config).run()
 }

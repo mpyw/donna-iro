@@ -28,17 +28,17 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use strum::EnumCount;
 
-use crate::audio::Player;
 use crate::color::{Answer, Color};
 use crate::config::Config;
 use crate::control::Control;
 use crate::cue::Cue;
 use crate::listener::Listener;
 use crate::matcher::Matcher;
+use crate::player::Player;
 use crate::screen::{Frame, Screen};
 
 pub struct Game {
-    player: Player,
+    player: Box<dyn Player>,
     screen: Box<dyn Screen>,
     matcher: Matcher,
     ears: Box<dyn Listener>,
@@ -50,7 +50,7 @@ pub struct Game {
 
 impl Game {
     pub fn new(
-        player: Player,
+        player: Box<dyn Player>,
         ears: Box<dyn Listener>,
         screen: Box<dyn Screen>,
         control: Box<dyn Control>,
@@ -188,6 +188,148 @@ mod tests {
     use strum::VariantArray;
 
     use super::*;
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use crate::config::Config;
+    use crate::player::Timing;
+
+    /// 鳴らした順を記録するだけ。長さ0なので待ち時間が消える。
+    #[derive(Clone, Default)]
+    struct Tape(Rc<RefCell<Vec<Cue>>>);
+
+    impl Player for Tape {
+        fn play(&self, cue: Cue) -> Result<()> {
+            self.0.borrow_mut().push(cue);
+            Ok(())
+        }
+        fn play_until_quiet(&self, cue: Cue) -> Result<()> {
+            self.play(cue)
+        }
+        fn begin(&self, cue: Cue) -> Result<Timing> {
+            self.play(cue)?;
+            Ok(Timing {
+                total: Duration::ZERO,
+                audible: Duration::ZERO,
+            })
+        }
+    }
+
+    /// 台本どおりに答える。`None` は「聞き取れなかった」。
+    ///
+    /// 台本が尽きたら「ぜんぶ」と答えて終わらせる。放っておくと
+    /// ランダムな色で回り続けてテストが返らない。
+    struct Script(std::vec::IntoIter<Option<&'static str>>);
+
+    impl Listener for Script {
+        fn hear(&mut self, _max: Duration) -> Result<Option<String>> {
+            match self.0.next() {
+                Some(answer) => Ok(answer.map(str::to_string)),
+                None => Ok(Some("ぜんぶ".to_string())),
+            }
+        }
+    }
+
+    struct Blind;
+    impl Screen for Blind {
+        fn show(&mut self, _frame: Frame) {}
+    }
+
+    /// `n` 回だけ「もう1回」に応える。
+    struct Again(usize);
+    impl Control for Again {
+        fn wait(&mut self) -> bool {
+            let more = self.0 > 0;
+            self.0 = self.0.saturating_sub(1);
+            more
+        }
+    }
+
+    /// 台本を渡して遊ばせ、鳴った順を返す。
+    fn played(answers: &[Option<&'static str>], again: usize) -> Vec<Cue> {
+        let tape = Tape::default();
+        Game::new(
+            Box::new(tape.clone()),
+            Box::new(Script(answers.to_vec().into_iter())),
+            Box::new(Blind),
+            Box::new(Again(again)),
+            &Config::default(),
+        )
+        .run()
+        .unwrap();
+        let cues = tape.0.borrow().clone();
+        cues
+    }
+
+    #[test]
+    fn answering_a_color_plays_its_phrase() {
+        assert_eq!(
+            played(&[Some("あか")], 0),
+            [
+                Cue::Intro,
+                Cue::Question,
+                Cue::Color(Color::Red),
+                Cue::Tail,
+                // 台本切れ →「ぜんぶ」
+                Cue::Question,
+                Cue::Finale,
+            ]
+        );
+    }
+
+    #[test]
+    fn unheard_answer_still_plays_some_color() {
+        let cues = played(&[None], 0);
+        // 黙ってはいけない。ランダムな色に倒す。
+        assert!(
+            matches!(cues[2], Cue::Color(_)),
+            "聞き取れなかったのに色が鳴っていない: {cues:?}"
+        );
+        // 事故で終わってはいけない。
+        assert_ne!(cues[2], Cue::Finale);
+    }
+
+    #[test]
+    fn a_break_comes_every_third_round() {
+        let cues = played(&[Some("あか"); 6], 0);
+        let breaks: Vec<Cue> = cues
+            .iter()
+            .filter(|c| matches!(c, Cue::Bridge | Cue::Interlude))
+            .copied()
+            .collect();
+        // 6周で2回。ブリッジと間奏が交互に入る。
+        assert_eq!(breaks, [Cue::Bridge, Cue::Interlude], "{cues:?}");
+    }
+
+    #[test]
+    fn only_the_interlude_gets_a_run_up() {
+        let cues = played(&[Some("あか"); 6], 0);
+        // 助走（tail-lead）は間奏の直前だけ。ブリッジの前は素の tail。
+        let lead = cues
+            .iter()
+            .position(|c| *c == Cue::TailLead)
+            .expect("助走が無い");
+        assert_eq!(cues[lead + 1], Cue::Interlude, "{cues:?}");
+        assert_eq!(cues.iter().filter(|c| **c == Cue::TailLead).count(), 1);
+    }
+
+    #[test]
+    fn again_replays_from_the_intro() {
+        let cues = played(&[], 1);
+        // 1周目 → もう1回 → 2周目。イントロから鳴らし直す。
+        assert_eq!(
+            cues,
+            [
+                Cue::Intro,
+                Cue::Question,
+                Cue::Finale,
+                Cue::Intro,
+                Cue::Question,
+                Cue::Finale,
+            ]
+        );
+    }
 
     #[test]
     fn shuffle_moves_every_position() {
