@@ -6,9 +6,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use crate::config::{Config, Listen};
-
 use super::WHISPER_SR;
+use crate::config::{Config, Listen};
 
 /// 監視の刻み。
 const TICK: Duration = Duration::from_millis(25);

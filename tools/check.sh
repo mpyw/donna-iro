@@ -111,11 +111,21 @@ else
   fail=1
 fi
 
-if cargo fmt --check >/dev/null 2>&1; then
-  printf '%-22s %s\n' "書式" "差分なし"
+# 書式。**`use` の粒度と並びは nightly でしか効かない**（rustfmt.toml を
+# 見ること）ので、入っていればそちらで見る。無ければ安定版で見る。安定版は
+# 効かない設定に警告を出すだけで、整形そのものは同じ。
+fmt=(cargo fmt)
+if nightly="$(rustup which --toolchain nightly rustfmt 2>/dev/null)"; then
+  fmt=(env "RUSTFMT=$nightly" cargo fmt)
+  label="書式（nightly）"
 else
-  printf '%-22s %s\n' "書式" "NG（cargo fmt を実行すること）"
-  cargo fmt --check 2>&1 | head -20
+  label="書式（安定版 / use の粒度は見ていない）"
+fi
+if "${fmt[@]}" --check >/dev/null 2>&1; then
+  printf '%-22s %s\n' "$label" "差分なし"
+else
+  printf '%-22s %s\n' "$label" "NG（cargo fmt を実行すること）"
+  "${fmt[@]}" --check 2>&1 | grep -v '^Warning' | head -20
   fail=1
 fi
 

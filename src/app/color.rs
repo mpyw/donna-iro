@@ -11,9 +11,8 @@
 //!
 //! 素材名は書かない。変種名を小文字にしたものが既定になる。
 
-use strum::{EnumCount, VariantArray};
-
 use const_for::const_for;
+use strum::{EnumCount, VariantArray};
 
 /// 光の三原色。色の言葉なのでここに置く。
 ///

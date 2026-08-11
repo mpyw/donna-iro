@@ -28,13 +28,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use strum::EnumCount;
 
-use crate::app::color::{Answer, Color};
-use crate::app::cue::Cue;
-use crate::app::matcher::Matcher;
-use crate::app::Control;
-use crate::app::Player;
-use crate::app::{Frame, Screen};
-use crate::app::{Heard, Listener};
+// `crate::app::` で来るものが `app` の外向きの顔。`Matcher` はここでしか
+// 使わない裏方なので、再エクスポートせず兄弟のまま参照する。
+use super::matcher::Matcher;
+use crate::app::{Answer, Color, Control, Cue, Frame, Heard, Listener, Player, Screen};
 use crate::config::Config;
 
 pub struct Game {
@@ -192,14 +189,13 @@ fn shuffle(prev: &[Color; Color::COUNT]) -> [Color; Color::COUNT] {
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray;
-
-    use super::*;
-
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::app::player::Timing;
+    use strum::VariantArray;
+
+    use super::*;
+    use crate::app::Timing;
     use crate::config::Config;
 
     /// 鳴らした順を記録するだけ。長さ0なので待ち時間が消える。

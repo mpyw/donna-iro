@@ -1,0 +1,7 @@
+# `use` の粒度と並びは rustfmt に決めさせる。手で揃えると必ずずれる。
+#
+# **どちらも nightly でしか効かない。** 安定版の `cargo fmt` は警告を出して
+# 素通りするだけなので、整形そのものは壊れない。tools/check.sh は nightly が
+# 入っていればそちらで見る。
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
