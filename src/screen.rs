@@ -3,9 +3,7 @@
 //! 本命はウィンドウ（`window.rs`）。テレビに映して2歳児に見せるものなので、
 //! ターミナルは動作確認用に色名を出すだけに留める。
 
-use crate::color::Color;
-
-pub type Rgb = (u8, u8, u8);
+use crate::color::{Color, Rgb};
 
 /// 今なにを映すか。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

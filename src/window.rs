@@ -13,8 +13,8 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 
-use crate::color::Color;
-use crate::screen::{border, Frame, Rgb, Screen};
+use crate::color::{Color, Rgb};
+use crate::screen::{border, Frame, Screen};
 
 const WIDTH: usize = 1280;
 const HEIGHT: usize = 720;

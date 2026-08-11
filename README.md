@@ -203,7 +203,7 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 3 │  listener.rs                        聞き取り
 2 │  audio.rs                           再生と録音
 1 │  cue.rs    matcher.rs   window.rs   素材 / 判定 / 描画
-0 │  color.rs⇄screen.rs  config.rs  control.rs
+0 │  color.rs   screen.rs   config.rs   control.rs
   │
   ↓ 何も知らない
 ```
@@ -222,15 +222,16 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 | `audio.rs` | `cue` `config` |
 | `window.rs` | `screen` `color` |
 | `cue.rs` `matcher.rs` `screen.rs` | `color` |
-| `color.rs` | `screen`（`Rgb` だけ） |
-| `config.rs` `control.rs` | なし |
+| `color.rs` `config.rs` `control.rs` | なし |
 
-`config.rs` と `control.rs` は**何にも依存しない**。設定と「もう1回」は、
-遊びの中身を知らなくても成り立つため。
+**例外はない。輪はどこにもなく、依存は完全な一方向。**
 
-**唯一の例外が `color.rs` ⇄ `screen.rs` の相互参照。** `Rgb` が `screen.rs`
-にあるせいで、色が画面を読んでいる。`Rgb` は色の側の言葉なので `color.rs`
-に移せば輪は解けて、依存はきれいな一方向になる。
+`color.rs` `config.rs` `control.rs` は何にも依存しない。色の定義・設定・
+「もう1回」は、どれも遊びの中身を知らなくても成り立つため。
+
+`Rgb`（`(u8, u8, u8)`）は `color.rs` にある。以前は `screen.rs` に置いて
+いて、そのせいで色が画面を読む向きになっていた。**色は画面を知らなくても
+成り立つ**ので、色の側の言葉は色の側に置く。
 
 macOS ではウィンドウをメインスレッドに置く必要があり、`cpal::Stream` も
 `rodio::OutputStream` も `!Send` なので、**ゲーム側をワーカースレッドに出して
