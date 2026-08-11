@@ -41,6 +41,9 @@ coreml = ["whisper-rs?/coreml"]
 anyhow = "1"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
+# Color::COUNT を数える（EnumCount）。手で持つと色を足したときに
+# 更新し忘れるので、変種の数は derive に任せる。
+strum = { version = "0.28", features = ["derive"] }
 
 # 録音 / 再生。どちらもクロスプラットフォームで、macOS では CoreAudio、
 # Raspberry Pi では ALSA を使う。ソースは共通のままでよい。

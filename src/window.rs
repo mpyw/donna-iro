@@ -13,6 +13,8 @@ use std::sync::OnceLock;
 use anyhow::{Context, Result};
 use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 
+use strum::VariantArray;
+
 use crate::color::{Color, Rgb};
 use crate::screen::{border, Frame, Screen};
 
@@ -129,7 +131,7 @@ fn palette(buf: &mut [u32], order: &[Color], shade: f32) {
 /// なお**押すのは画面のどこでもよい**。これは押せることを示すボタンの絵で
 /// あって、当たり判定ではない。テレビの前で正確に狙わせるのは無理がある。
 fn again(buf: &mut [u32]) {
-    palette(buf, &Color::ALL, 0.28);
+    palette(buf, Color::VARIANTS, 0.28);
 
     const LABEL: &str = "もう1回";
     let (cx, cy) = (WIDTH as i32 / 2, HEIGHT as i32 / 2);

@@ -42,6 +42,8 @@ mod mic {
 
     use super::Listener;
     use crate::audio::{Ears, WHISPER_SR};
+    use strum::VariantArray;
+
     use crate::color::Color;
     use crate::config::Config;
 
@@ -63,7 +65,7 @@ mod mic {
     /// 「むらさき」が「村先」になった。同音の漢字は無限にあるので、
     /// 読みを足していく方式では追いつかない。出力そのものを寄せる。
     fn vocabulary() -> String {
-        let mut words: Vec<&str> = Color::ALL.iter().map(|c| c.reading()).collect();
+        let mut words: Vec<&str> = Color::VARIANTS.iter().map(|c| c.reading()).collect();
         words.push(crate::matcher::ALL_READING);
         words.join("、") + "。"
     }

@@ -1,7 +1,9 @@
 //! 鳴らす素材。
 //!
 //! 文字列で指すと綴り間違いがビルドを通ってしまうので型にする。
-//! `ALL` に並べてあるものが、そのまま埋め込みビルドの対象になる。
+//! `every()` に並べてあるものが、そのまま埋め込みビルドの対象になる。
+
+use strum::VariantArray;
 
 use crate::color::Color;
 
@@ -50,13 +52,15 @@ impl Cue {
             Cue::Interlude,
             Cue::Finale,
         ];
-        v.extend(Color::ALL.iter().map(|&c| Cue::Color(c)));
+        v.extend(Color::VARIANTS.iter().map(|&c| Cue::Color(c)));
         v
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use strum::EnumCount;
+
     use super::*;
 
     #[test]
@@ -70,6 +74,6 @@ mod tests {
 
     #[test]
     fn every_covers_all_colors() {
-        assert_eq!(Cue::every().len(), 7 + Color::ALL.len());
+        assert_eq!(Cue::every().len(), 7 + Color::COUNT);
     }
 }

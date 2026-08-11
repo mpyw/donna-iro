@@ -19,6 +19,8 @@
 //!
 //! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
+use strum::VariantArray;
+
 use crate::color::Color;
 
 /// 子どもの応答。
@@ -89,12 +91,12 @@ pub struct Matcher {
 impl Matcher {
     pub fn new(head: usize) -> Self {
         let mut candidates: Vec<(Answer, String)> = Vec::new();
-        for c in Color::ALL {
+        for &c in Color::VARIANTS {
             candidates.push((Answer::Color(c), normalize(c.reading())));
         }
         candidates.push((Answer::All, normalize(ALL_READING)));
         candidates.push((Answer::All, normalize(ALL_KANJI)));
-        for c in Color::ALL {
+        for &c in Color::VARIANTS {
             if let Some(k) = c.kanji() {
                 candidates.push((Answer::Color(c), normalize(k)));
             }

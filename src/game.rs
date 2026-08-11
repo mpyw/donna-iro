@@ -26,6 +26,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use strum::{EnumCount, VariantArray};
 
 use crate::audio::Player;
 use crate::color::Color;
@@ -153,7 +154,7 @@ impl Game {
     fn finale(&mut self) -> Result<()> {
         let timing = self.player.begin(Cue::Finale)?;
         let end = Instant::now() + timing.total;
-        let mut order = Color::ALL;
+        let mut order = Color::all();
         while Instant::now() < end {
             order = shuffle(&order);
             self.screen.show(Frame::Palette(order));
@@ -188,15 +189,15 @@ mod tests {
 
     #[test]
     fn shuffle_moves_every_position() {
-        let mut order = Color::ALL;
+        let mut order = Color::all();
         for _ in 0..200 {
             let next = shuffle(&order);
             // 全色が1つずつ残っている
             let mut a = next;
             a.sort_by_key(|c| c.stem());
-            let mut b = Color::ALL;
+            let mut b = Color::VARIANTS.to_vec();
             b.sort_by_key(|c| c.stem());
-            assert_eq!(a, b, "色が増減している");
+            assert_eq!(a.as_slice(), b, "色が増減している");
             // どの位置も色が変わっている
             assert!(
                 next.iter().zip(order.iter()).all(|(x, y)| x != y),
