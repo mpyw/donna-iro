@@ -73,37 +73,32 @@ mod mic {
         n + END.len()
     }
 
+    /// `src` を `dst` の `at` から書き、次に書ける位置を返す。
+    ///
+    /// const では `copy_from_slice` が使えないので手で回す。3箇所で同じ
+    /// ことをするので括り出してある。
+    const fn put(dst: &mut [u8], at: usize, src: &[u8]) -> usize {
+        let mut i = 0;
+        while i < src.len() {
+            dst[at + i] = src[i];
+            i += 1;
+        }
+        at + src.len()
+    }
+
     /// 実体。`from_utf8` に渡すために、先に置き場所を用意する。
     static VOCABULARY_BYTES: [u8; vocabulary_len()] = {
         let every = Answer::every();
         let mut out = [0u8; vocabulary_len()];
         let (mut n, mut i) = (0, 0);
         while i < Answer::COUNT {
-            let word = every[i].reading().as_bytes();
-            let mut k = 0;
-            while k < word.len() {
-                out[n] = word[k];
-                n += 1;
-                k += 1;
-            }
+            n = put(&mut out, n, every[i].reading().as_bytes());
             if i + 1 < Answer::COUNT {
-                let join = JOIN.as_bytes();
-                let mut k = 0;
-                while k < join.len() {
-                    out[n] = join[k];
-                    n += 1;
-                    k += 1;
-                }
+                n = put(&mut out, n, JOIN.as_bytes());
             }
             i += 1;
         }
-        let end = END.as_bytes();
-        let mut k = 0;
-        while k < end.len() {
-            out[n] = end[k];
-            n += 1;
-            k += 1;
-        }
+        put(&mut out, n, END.as_bytes());
         out
     };
 
