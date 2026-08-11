@@ -18,19 +18,14 @@ APP="target/$NAME.app"
 BUNDLE_ID="com.mpyw.donna-iro"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 
-# --- 埋め込む実体があるか先に見る。ビルドしてから失敗すると時間の無駄 ---
-missing=()
-for stem in intro question tail tail-lead bridge interlude all \
-  red blue yellow green yellowgreen white black pink orange purple brown lightblue; do
-  [ -f "assets/$stem.wav" ] || missing+=("assets/$stem.wav")
-done
-[ -f models/ggml-base.bin ] || missing+=("models/ggml-base.bin")
-
-if [ ${#missing[@]} -gt 0 ]; then
+# 素材の一覧はここに持たない。足りないものは include_bytes! が
+# ファイル名つきでコンパイル時に落とすし、表への並べ忘れも const の検査で
+# 止まる（audio.rs）。ここで並べると、色を足すたびに直す場所が増えるだけ。
+echo "ビルド中（Metal は macOS で既定有効。whisper.cpp を組み直すので数分かかります）"
+if ! cargo build --release --features embed; then
+  echo >&2
   echo ".app にするには音源とモデルを埋め込む必要があります（CWD が / になるため）。" >&2
-  echo "足りないもの: ${#missing[@]} 件" >&2
-  printf '  %s\n' "${missing[@]:0:5}" >&2
-  [ ${#missing[@]} -gt 5 ] && echo "  ..." >&2
+  echo "上のエラーに足りないファイル名が出ています。" >&2
   echo >&2
   echo "つくよみちゃんの音源がまだなら、確認用の合成音で代用できます:" >&2
   echo "  for f in assets/reference/*.wav; do cp \"\$f\" assets/; done" >&2
@@ -38,9 +33,6 @@ if [ ${#missing[@]} -gt 0 ]; then
   echo "  tools/fetch-model.sh" >&2
   exit 1
 fi
-
-echo "ビルド中（Metal は macOS で既定有効。whisper.cpp を組み直すので数分かかります）"
-cargo build --release --features embed
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
