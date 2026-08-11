@@ -2,9 +2,11 @@
 //!
 //! 語彙をここに閉じることで、汎用 ASR に頼らずとも判定できるようにする。
 //!
-//! **色ごとの情報は下の表に1行で書く。** 読み・漢字・RGB・表示名・素材名を
+//! **色ごとの情報は下の定義に1箇所でまとめて書く。** 読み・漢字・RGB・表示名を
 //! 別々の `match` に散らしていた頃は、色を足すたびに5箇所を回る必要があり、
-//! しかも並びが揃っているかを目で確かめるしかなかった。表なら横に読める。
+//! 対応が合っているかを目で数えるしかなかった。
+//!
+//! 素材名は書かない。変種名を小文字にしたものが既定になる。
 
 use strum::{EnumCount, VariantArray};
 
@@ -13,6 +15,21 @@ use strum::{EnumCount, VariantArray};
 /// 画面の側（`screen.rs`）に置いていたことがあり、そのせいで色が画面を
 /// 読む向きになっていた。色は画面を知らなくても成り立つ。
 pub type Rgb = (u8, u8, u8);
+
+/// ASCII を小文字にする。変種名から素材名を作るためだけのもの。
+///
+/// `const` で回すには長さが型に載っている必要があるので、呼ぶ側が
+/// `stringify!` の長さを渡す。非 ASCII は来ない（変種名は識別子）。
+const fn lower<const N: usize>(s: &str) -> [u8; N] {
+    let bytes = s.as_bytes();
+    let mut out = [0u8; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = bytes[i].to_ascii_lowercase();
+        i += 1;
+    }
+    out
+}
 
 /// 色の定義から `Color` と、色ごとの値を返す `const fn` を一度に作る。
 ///
@@ -29,6 +46,22 @@ macro_rules! colors {
     (@kanji) => { None };
     (@kanji $kanji:literal) => { Some($kanji) };
 
+    // `stem` の行が無ければ変種名を小文字にしたもの。今の12色はすべてその形
+    // なので、書くと同じ語を2回持つことになる。
+    //
+    // `macro_rules!` に大文字小文字の変換は無いため、`const fn` で回している。
+    // 長さを型に載せないと配列が作れないので `stringify!` の長さを渡す。
+    // これで `const S: &str = Color::Red.stem();` も通る。
+    (@stem $variant:ident) => {{
+        const N: usize = stringify!($variant).len();
+        static BYTES: [u8; N] = lower::<N>(stringify!($variant));
+        match std::str::from_utf8(&BYTES) {
+            Ok(s) => s,
+            Err(_) => panic!("変種名は ASCII のはず"),
+        }
+    }};
+    (@stem $variant:ident $stem:literal) => { $stem };
+
     ($(
         $(#[$meta:meta])*
         $variant:ident: {
@@ -36,7 +69,7 @@ macro_rules! colors {
             $(kanji: $kanji:literal,)?
             rgb: $rgb:expr,
             name: $name:literal,
-            stem: $stem:literal,
+            $(stem: $stem:literal,)?
         },
     )*) => {
         /// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
@@ -79,8 +112,10 @@ macro_rules! colors {
             }
 
             /// 音源のファイル名。`assets/<stem>.wav`。
+            ///
+            /// 既定は変種名の小文字。合わない色が出たら `stem:` で上書きする。
             pub const fn stem(&self) -> &'static str {
-                match self { $(Color::$variant => $stem,)* }
+                match self { $(Color::$variant => colors!(@stem $variant $($stem)?),)* }
             }
         }
     };
@@ -92,84 +127,72 @@ colors! {
         kanji: "赤",
         rgb: (230, 0, 18),
         name: "赤",
-        stem: "red",
     },
     Blue: {
         reading: "あお",
         kanji: "青",
         rgb: (0, 104, 183),
         name: "青",
-        stem: "blue",
     },
     Yellow: {
         reading: "きいろ",
         kanji: "黄色",
         rgb: (255, 241, 0),
         name: "黄",
-        stem: "yellow",
     },
     Green: {
         reading: "みどり",
         kanji: "緑",
         rgb: (0, 153, 68),
         name: "緑",
-        stem: "green",
     },
     YellowGreen: {
         reading: "きみどり",
         kanji: "黄緑",
         rgb: (143, 195, 31),
         name: "黄緑",
-        stem: "yellowgreen",
     },
     White: {
         reading: "しろ",
         kanji: "白",
         rgb: (245, 245, 245),
         name: "白",
-        stem: "white",
     },
     Black: {
         reading: "くろ",
         kanji: "黒",
         rgb: (35, 24, 21),
         name: "黒",
-        stem: "black",
     },
     /// 「桃色」とは言われないので漢字表記は持たない。
     Pink: {
         reading: "ぴんく",
         rgb: (233, 84, 140),
         name: "ピンク",
-        stem: "pink",
     },
     /// 「橙」は2歳児の語彙に無いので漢字表記は持たない。
     Orange: {
         reading: "おれんじ",
         rgb: (243, 152, 0),
         name: "オレンジ",
-        stem: "orange",
     },
     Purple: {
         reading: "むらさき",
         kanji: "紫",
         rgb: (146, 7, 131),
         name: "紫",
-        stem: "purple",
     },
     Brown: {
         reading: "ちゃいろ",
         kanji: "茶色",
         rgb: (122, 69, 26),
         name: "茶",
-        stem: "brown",
     },
     LightBlue: {
         reading: "みずいろ",
         kanji: "水色",
         rgb: (0, 160, 233),
         name: "水色",
-        stem: "lightblue",
     },
 }
 
@@ -216,16 +239,16 @@ mod tests {
         assert_eq!(RED, "あか");
     }
 
-    /// 素材名はファイル名になるので、日本語や大文字が混ざると事故る。
-    /// 表に手で書く列なので、形だけ見ておく。
+    /// 素材名は変種名を `lower` で小文字にして作る。ファイル名になるので、
+    /// 大文字や区切りが混ざると `assets/<stem>.wav` が見つからなくなる。
+    /// `lower` が期待どおり動いていることをここで押さえる。
     #[test]
-    fn stems_are_lowercase_ascii() {
+    fn stems_are_the_variant_name_lowercased() {
         for c in Color::VARIANTS {
-            let stem = c.stem();
-            assert!(
-                stem.chars().all(|ch| ch.is_ascii_lowercase()),
-                "素材名が小文字の ASCII でない: {stem}"
-            );
+            let expected = format!("{c:?}").to_ascii_lowercase();
+            assert_eq!(c.stem(), expected, "素材名が変種名の小文字になっていない");
         }
+        // 語の区切りは入らない（YellowGreen → yellowgreen）。
+        assert_eq!(Color::YellowGreen.stem(), "yellowgreen");
     }
 }
