@@ -89,45 +89,71 @@ const fn char_count(s: &str) -> usize {
     n
 }
 
-/// 判定の候補。**長い読みから順に並べてある。**
+/// 候補の数。読みが全応答ぶん、漢字はある応答のぶんだけ。
+const CANDIDATE_COUNT: usize = Answer::COUNT + kanji_count();
+
+/// 候補の並び順。**同点が出ないところまで見る。**
 ///
-/// 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）があるので、
-/// 部分一致は長いほうから試さないと取りこぼす。
+/// 長さの降順が主。短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
+/// あるので、部分一致は長いほうから試さないと取りこぼす。
 ///
-/// 読みを全部入れてから漢字を全部入れる。同じ長さなら読みを先に当てたい
-/// ので、並べ替えは安定であること（挿入ソートで等しいものは動かさない）。
+/// 同じ長さなら元の位置の昇順。作る順は「読みを全部 → 漢字を全部」で、
+/// どちらも `Answer::every()` の順なので、これで「読みが漢字より先」と
+/// 「先に宣言した色が先」の両方が決まる。
+///
+/// **ここまで見れば同点が無い。** 並べ替えが安定かどうかに結果が依らなく
+/// なるので、アルゴリズムを差し替えても並びは変わらない。
+const fn after(a: (Answer, &str, usize), b: (Answer, &str, usize)) -> bool {
+    let (la, lb) = (char_count(a.1), char_count(b.1));
+    if la != lb {
+        la < lb
+    } else {
+        a.2 > b.2
+    }
+}
+
+/// 判定の候補。
 ///
 /// **`normalize` は通さない。** 語彙の側が正規形で書かれている約束
 /// （`color.rs` を見ること）なので、通しても何も起きない。破れていない
 /// ことは `vocabulary_is_already_normalized` で見ている。
-const CANDIDATES: [(Answer, &str); Answer::COUNT + kanji_count()] = {
+const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
     let every = Answer::every();
-    let mut out = [(Answer::All, ""); Answer::COUNT + kanji_count()];
 
+    // 3つ目は作った順。並べ替えの second key に使う。
+    let mut buf = [(Answer::All, "", 0usize); CANDIDATE_COUNT];
     let (mut n, mut i) = (0, 0);
     while i < Answer::COUNT {
-        out[n] = (every[i], every[i].reading());
+        buf[n] = (every[i], every[i].reading(), n);
         n += 1;
         i += 1;
     }
     let mut i = 0;
     while i < Answer::COUNT {
         if let Some(k) = every[i].kanji() {
-            out[n] = (every[i], k);
+            buf[n] = (every[i], k, n);
             n += 1;
         }
         i += 1;
     }
 
     let mut i = 1;
-    while i < out.len() {
+    while i < CANDIDATE_COUNT {
         let mut j = i;
-        while j > 0 && char_count(out[j - 1].1) < char_count(out[j].1) {
-            let swap = out[j - 1];
-            out[j - 1] = out[j];
-            out[j] = swap;
+        while j > 0 && after(buf[j - 1], buf[j]) {
+            let swap = buf[j - 1];
+            buf[j - 1] = buf[j];
+            buf[j] = swap;
             j -= 1;
         }
+        i += 1;
+    }
+
+    // 並べ終わったら位置は要らない。
+    let mut out = [(Answer::All, ""); CANDIDATE_COUNT];
+    let mut i = 0;
+    while i < CANDIDATE_COUNT {
+        out[i] = (buf[i].0, buf[i].1);
         i += 1;
     }
     out
@@ -437,9 +463,12 @@ mod tests {
             "長い順でない: {lens:?}"
         );
 
-        // 同じ長さなら読みが先。**並べ替えが安定であることに依存している。**
-        // 不安定なものに差し替えるとここで落ちる。「あかあお」のように
-        // 繋がって認識されたとき、どちらを採るかが変わってしまうため。
+        // 同じ長さなら読みが先。`after` が元の位置まで見るので、並べ替えの
+        // 安定性に関係なくこの順になる。ここで見ているのは「意図した順に
+        // なっているか」であって、アルゴリズムの性質ではない。
+        //
+        // 崩れると「あかあお」のように繋がって認識されたとき、部分一致が
+        // どちらを採るかが変わる。
         let is_kanji = |(a, r): &(Answer, &str)| a.kanji() == Some(*r);
         for w in CANDIDATES.windows(2) {
             if w[0].1.chars().count() == w[1].1.chars().count() && is_kanji(&w[0]) {
