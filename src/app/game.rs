@@ -32,16 +32,16 @@ use crate::app::color::{Answer, Color};
 use crate::app::cue::Cue;
 use crate::app::matcher::Matcher;
 use crate::app::Control;
-use crate::app::Listener;
 use crate::app::Player;
 use crate::app::{Frame, Screen};
+use crate::app::{Heard, Listener};
 use crate::config::Config;
 
 pub struct Game {
     player: Box<dyn Player>,
     screen: Box<dyn Screen>,
     matcher: Matcher,
-    ears: Box<dyn Listener>,
+    listener: Box<dyn Listener>,
     control: Box<dyn Control>,
     listen_max: Duration,
     insert_every: u32,
@@ -51,7 +51,7 @@ pub struct Game {
 impl Game {
     pub fn new(
         player: Box<dyn Player>,
-        ears: Box<dyn Listener>,
+        listener: Box<dyn Listener>,
         screen: Box<dyn Screen>,
         control: Box<dyn Control>,
         cfg: &Config,
@@ -60,7 +60,7 @@ impl Game {
             player,
             screen,
             matcher: Matcher::new(cfg.recognize.head_segments),
-            ears,
+            listener,
             control,
             listen_max: cfg.listen.max(),
             insert_every: cfg.game.insert_every,
@@ -74,11 +74,14 @@ impl Game {
     /// 「続けると言われたか」だけ。
     pub fn run(&mut self) -> Result<()> {
         loop {
-            self.play_through()?;
+            if !self.play_through()? {
+                // 入力が絶えた。「もう1回」を訊く相手がいない。
+                return Ok(());
+            }
             // 待っていることを画面に出してから待つ。黙って止まっていると、
             // 終わったのか固まったのか区別がつかない。
             self.screen.show(Frame::Again);
-            if !self.control.wait() {
+            if !self.control.wait_for_again() {
                 return Ok(());
             }
         }
@@ -88,7 +91,7 @@ impl Game {
     ///
     /// 周回数はここで閉じているので、もう1回のたびに区切りの周期も
     /// 頭から数え直す。前回の続きから間奏が来ると唐突になる。
-    fn play_through(&mut self) -> Result<()> {
+    fn play_through(&mut self) -> Result<bool> {
         self.screen.show(Frame::palette());
         self.player.play(Cue::Intro)?;
 
@@ -105,11 +108,15 @@ impl Game {
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
             self.player.play_until_quiet(Cue::Question)?;
 
-            let heard = self.ears.hear(self.listen_max)?;
-            let answer = heard.as_deref().and_then(|t| self.matcher.find(t));
+            let answer = match self.listener.hear(self.listen_max)? {
+                Heard::Said(text) => self.matcher.find(&text),
+                Heard::Nothing => None,
+                Heard::Closed => return Ok(false),
+            };
 
             if answer == Some(Answer::All) {
-                return self.finale();
+                self.finale()?;
+                return Ok(true);
             }
 
             // 聞き取れなければランダムな色。黙ってはいけない。
@@ -223,11 +230,14 @@ mod tests {
     struct Script(std::vec::IntoIter<Option<&'static str>>);
 
     impl Listener for Script {
-        fn hear(&mut self, _max: Duration) -> Result<Option<String>> {
-            match self.0.next() {
-                Some(answer) => Ok(answer.map(str::to_string)),
-                None => Ok(Some("ぜんぶ".to_string())),
-            }
+        fn hear(&mut self, _max: Duration) -> Result<Heard> {
+            Ok(match self.0.next() {
+                Some(Some(answer)) => Heard::Said(answer.to_string()),
+                Some(None) => Heard::Nothing,
+                // 台本が尽きたら「ぜんぶ」。放っておくとランダムな色で
+                // 回り続けてテストが返らない。
+                None => Heard::Said("ぜんぶ".to_string()),
+            })
         }
     }
 
@@ -239,7 +249,7 @@ mod tests {
     /// `n` 回だけ「もう1回」に応える。
     struct Again(usize);
     impl Control for Again {
-        fn wait(&mut self) -> bool {
+        fn wait_for_again(&mut self) -> bool {
             let more = self.0 > 0;
             self.0 = self.0.saturating_sub(1);
             more
@@ -247,11 +257,11 @@ mod tests {
     }
 
     /// 台本を渡して遊ばせ、鳴った順を返す。
-    fn played(answers: &[Option<&'static str>], again: usize) -> Vec<Cue> {
+    fn played(answers: Vec<Option<&'static str>>, again: usize) -> Vec<Cue> {
         let tape = Tape::default();
         Game::new(
             Box::new(tape.clone()),
-            Box::new(Script(answers.to_vec().into_iter())),
+            Box::new(Script(answers.into_iter())),
             Box::new(Blind),
             Box::new(Again(again)),
             &Config::default(),
@@ -265,7 +275,7 @@ mod tests {
     #[test]
     fn answering_a_color_plays_its_phrase() {
         assert_eq!(
-            played(&[Some("あか")], 0),
+            played(vec![Some("あか")], 0),
             [
                 Cue::Intro,
                 Cue::Question,
@@ -278,9 +288,43 @@ mod tests {
         );
     }
 
+    /// 入力そのものが閉じたら、そこで畳む。
+    ///
+    /// **`--keyboard` をパイプで流し込むと EOF がここに来る。** 「無言」と
+    /// 同じ扱いにしていた頃は、ランダムな色を上限まで鳴らし続けて返らなかった。
+    /// フィナーレも「もう1回」も通らずに終わるのが正しい。
+    #[test]
+    fn closed_input_ends_the_game_without_a_finale() {
+        struct Eof;
+        impl Listener for Eof {
+            fn hear(&mut self, _max: Duration) -> Result<Heard> {
+                Ok(Heard::Closed)
+            }
+        }
+        let tape = Tape::default();
+        Game::new(
+            Box::new(tape.clone()),
+            Box::new(Eof),
+            Box::new(Blind),
+            // 何度でも応える。**閉じた側が勝たないと返ってこない。**
+            Box::new(Again(usize::MAX)),
+            &Config::default(),
+        )
+        .run()
+        .unwrap();
+
+        let cues = tape.0.borrow().clone();
+        assert_eq!(
+            cues,
+            [Cue::Intro, Cue::Question],
+            "余計に鳴っている: {cues:?}"
+        );
+        assert!(!cues.contains(&Cue::Finale), "閉じたのにフィナーレが鳴った");
+    }
+
     #[test]
     fn unheard_answer_still_plays_some_color() {
-        let cues = played(&[None], 0);
+        let cues = played(vec![None], 0);
         // 黙ってはいけない。ランダムな色に倒す。
         assert!(
             matches!(cues[2], Cue::Color(_)),
@@ -292,7 +336,7 @@ mod tests {
 
     #[test]
     fn a_break_comes_every_third_round() {
-        let cues = played(&[Some("あか"); 6], 0);
+        let cues = played(vec![Some("あか"); 6], 0);
         let breaks: Vec<Cue> = cues
             .iter()
             .filter(|c| matches!(c, Cue::Bridge | Cue::Interlude))
@@ -304,7 +348,7 @@ mod tests {
 
     #[test]
     fn only_the_interlude_gets_a_run_up() {
-        let cues = played(&[Some("あか"); 6], 0);
+        let cues = played(vec![Some("あか"); 6], 0);
         // 助走（tail-lead）は間奏の直前だけ。ブリッジの前は素の tail。
         let lead = cues
             .iter()
@@ -316,7 +360,7 @@ mod tests {
 
     #[test]
     fn again_replays_from_the_intro() {
-        let cues = played(&[], 1);
+        let cues = played(vec![], 1);
         // 1周目 → もう1回 → 2周目。イントロから鳴らし直す。
         assert_eq!(
             cues,

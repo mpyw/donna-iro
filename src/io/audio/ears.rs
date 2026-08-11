@@ -1,6 +1,6 @@
 //! マイクからの録音。cpal で開きっぱなしにして、呼ばれるたびに切り出す。
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -29,6 +29,13 @@ pub struct Ears {
     /// 環境ノイズの推定値。毎回の観測で更新する。
     floor: f32,
     cfg: Listen,
+    /// 入力ストリームが壊れた事実。一度立ったら下げない。
+    ///
+    /// **ログに出すだけでは足りない。** マイクを抜かれてもストリームは
+    /// 黙って無音を流し続けるので、`listen` は毎回「無言」で返り、遊びは
+    /// 永久にランダムな色を出し続ける。壊れているのに動いているように
+    /// 見えるので、終了コードを直しても再起動の合図が立たない。
+    fault: Arc<Mutex<Option<String>>>,
 }
 
 impl Ears {
@@ -47,31 +54,34 @@ impl Ears {
         let config: cpal::StreamConfig = supported.into();
 
         let buf = Arc::new(Mutex::new(Vec::<f32>::new()));
-        let err = |e| eprintln!("入力ストリームのエラー: {e}");
 
-        // チャンネルを混ぜてモノラルにしながら溜める。
-        macro_rules! sink {
-            ($t:ty, $conv:expr) => {{
-                let buf = Arc::clone(&buf);
-                let conv: fn($t) -> f32 = $conv;
-                device.build_input_stream(
-                    &config,
-                    move |data: &[$t], _: &cpal::InputCallbackInfo| {
-                        let mut b = buf.lock().unwrap();
-                        for frame in data.chunks(channels) {
-                            b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
-                        }
-                    },
-                    err,
-                    None,
-                )?
-            }};
-        }
+        // **溜めっぱなしにしない。** ストリームは開きっぱなしなので、
+        // listen() が呼ばれない間も溜まり続ける。「もう1回」の待ちは
+        // 押されるまで無期限なので、上限が無いと際限なく増える。
+        // 16kHz でも毎時 230MB、48kHz なら 0.7GB。テレビに繋ぎっぱなしの
+        // 玩具でそれをやると、朝には起きてこない。
+        //
+        // listen() は頭で捨ててから聞くので、待ちの間のぶんは要らない。
+        let cap = (rate as f32 * (cfg.listen.max().as_secs_f32() + 2.0)) as usize;
 
+        let fault = Arc::new(Mutex::new(None::<String>));
+
+        // **サンプルの型ごとに呼び分ける。** クロージャで束ねようとすると
+        // 最初の型に固定されてしまうので、関数をそのまま呼ぶ。
+        let sink = Sink {
+            channels,
+            cap,
+            buf: &buf,
+            fault: &fault,
+        };
         let stream = match format {
-            cpal::SampleFormat::F32 => sink!(f32, |s| s),
-            cpal::SampleFormat::I16 => sink!(i16, |s| s as f32 / i16::MAX as f32),
-            cpal::SampleFormat::U16 => sink!(u16, |s| (s as f32 - 32768.0) / 32768.0),
+            cpal::SampleFormat::F32 => sink.open(&device, &config, |s: f32| s)?,
+            cpal::SampleFormat::I16 => {
+                sink.open(&device, &config, |s: i16| s as f32 / i16::MAX as f32)?
+            }
+            cpal::SampleFormat::U16 => {
+                sink.open(&device, &config, |s: u16| (s as f32 - 32768.0) / 32768.0)?
+            }
             other => anyhow::bail!("未対応のサンプル形式: {other:?}"),
         };
         stream.play()?;
@@ -83,9 +93,9 @@ impl Ears {
         // 物音がひとつ入るだけで倍以上ずれる。
         let mut levels = Vec::with_capacity(FLOOR_CHUNKS);
         for _ in 0..FLOOR_CHUNKS {
-            buf.lock().unwrap().clear();
+            lock(&buf).clear();
             std::thread::sleep(TICK * 2);
-            levels.push(rms(&buf.lock().unwrap()));
+            levels.push(rms(&lock(&buf)));
         }
         levels.sort_by(|a, b| a.total_cmp(b));
         let floor = levels[FLOOR_CHUNKS / 2];
@@ -95,8 +105,12 @@ impl Ears {
             rate,
             floor,
             cfg: cfg.listen.clone(),
+            fault,
         };
         eprintln!("  環境ノイズ {floor:.4} → しきい値 {:.4}", ears.threshold());
+        // 測っている間に壊れていたらここで止める。起動時に死んでいる
+        // マイクで開始して、最初の聞き取りまで気づかないのを避ける。
+        ears.check_fault()?;
         Ok(ears)
     }
 
@@ -105,6 +119,21 @@ impl Ears {
             return self.cfg.threshold;
         }
         (self.floor * self.cfg.speech_ratio).clamp(self.cfg.speech_floor, self.cfg.speech_ceil)
+    }
+
+    /// 入力ストリームが壊れていないか。**無言と故障は別のこと。**
+    ///
+    /// 壊れたまま「聞こえなかった」を返し続けると、遊びはランダムな色を
+    /// 出し続けて正常に見える。終了コードを直しても再起動の合図が立たない。
+    ///
+    /// **効くのは cpal がエラーを投げたときだけ。** マイクが黙って無音を
+    /// 返すようになった場合は捕まらないし、実際に発火したのを見たことも
+    /// まだ無い。それでも装置の故障を知る手立てはこれしかないので残す。
+    fn check_fault(&self) -> Result<()> {
+        match lock(&self.fault).as_deref() {
+            Some(e) => anyhow::bail!("マイクの入力ストリームが壊れている: {e}"),
+            None => Ok(()),
+        }
     }
 
     /// 環境ノイズの推定を観測で更新する。
@@ -129,9 +158,11 @@ impl Ears {
     ///
     /// 何も聞こえなければ `None`。呼び出し側でランダムな色に倒す。
     pub fn listen(&mut self, max: Duration) -> Result<Option<Vec<f32>>> {
+        self.check_fault()?;
+
         // ストリームは鳴っている間も回り続けているので、直前に流した
         // 歌が溜まっている。窓を開ける前に捨てる。
-        self.buf.lock().unwrap().clear();
+        lock(&self.buf).clear();
 
         let window = (self.rate as usize / 5).max(1);
         let start = Instant::now();
@@ -147,7 +178,7 @@ impl Ears {
         while start.elapsed() < max {
             std::thread::sleep(TICK);
             let level = {
-                let b = self.buf.lock().unwrap();
+                let b = lock(&self.buf);
                 rms(&b[b.len().saturating_sub(window)..])
             };
 
@@ -188,11 +219,85 @@ impl Ears {
             threshold,
             self.threshold()
         );
-        if !heard {
-            return Ok(None);
-        }
-        let raw = self.buf.lock().unwrap().clone();
-        Ok(Some(resample(&raw, self.rate, WHISPER_SR)))
+        // 先に結果を作ってから、**最後に**故障を見る。窓を開けている
+        // 最中に抜かれると、この回は「無言」で返ってランダムな色が1つ
+        // 鳴り、気づくのが次の聞き取りまで遅れる。
+        //
+        // 取り出しと変換のあとに置くのは、その間に来たぶんも拾うため。
+        // 完全に消せる競走ではないが、窓は最小になる。
+        let out = heard.then(|| {
+            // clone してから resample すると二度写す。持っていく。
+            let raw = std::mem::take(&mut *lock(&self.buf));
+            resample(&raw, self.rate, WHISPER_SR)
+        });
+        self.check_fault()?;
+        Ok(out)
+    }
+}
+
+/// 入力ストリームを開くための持ち物。**サンプルの型だけが違う3通りを
+/// 1箇所にまとめる。**
+///
+/// `build_input_stream` はデータのコールバックが型で決まるので、クロージャ
+/// ひとつでは束ねられない（クロージャはジェネリックにできない）。型ごとに
+/// 呼び分けるしかないが、渡すものはどれも同じなので、そちらを持たせる。
+struct Sink<'a> {
+    channels: usize,
+    cap: usize,
+    buf: &'a Arc<Mutex<Vec<f32>>>,
+    fault: &'a Arc<Mutex<Option<String>>>,
+}
+
+impl Sink<'_> {
+    /// チャンネルを混ぜてモノラルにしながら溜める。
+    fn open<T>(
+        &self,
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        conv: fn(T) -> f32,
+    ) -> Result<cpal::Stream>
+    where
+        T: cpal::SizedSample + Send + 'static,
+    {
+        let (buf, channels, cap) = (Arc::clone(self.buf), self.channels, self.cap);
+        // 壊れたら残す。読むのは listen() の入口と出口。
+        let broke = Arc::clone(self.fault);
+        Ok(device.build_input_stream(
+            config,
+            move |data: &[T], _: &cpal::InputCallbackInfo| {
+                let mut b = lock(&buf);
+                for frame in data.chunks(channels) {
+                    b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
+                }
+                trim(&mut b, cap);
+            },
+            move |e| {
+                eprintln!("入力ストリームのエラー: {e}");
+                lock(&broke).get_or_insert_with(|| e.to_string());
+            },
+            None,
+        )?)
+    }
+}
+
+/// ロックを取る。**毒されていても続ける。**
+///
+/// 音声のコールバックは cpal のスレッドで回る。そこが何かで落ちると
+/// ミューテックスが毒され、以後は `unwrap` するたびにゲーム側まで道連れに
+/// なる。中身は録音した波形と、壊れた事実の控えでしかないので、途中で
+/// 落ちた誰かが居ても、そのまま使って困るものではない。
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// 溜まりすぎた先頭を捨てる。**新しいほうを残す。**
+///
+/// 上限の倍まで伸ばしてからまとめて捨てる。毎回きっちり `cap` に収めると、
+/// そのたびに残り全体をずらすことになる。
+fn trim(buf: &mut Vec<f32>, cap: usize) {
+    if buf.len() > cap * 2 {
+        let drop = buf.len() - cap;
+        buf.drain(..drop);
     }
 }
 
@@ -225,32 +330,107 @@ fn resample(src: &[f32], from: u32, to: u32) -> Vec<f32> {
 
 /// 使う入力デバイスを決める。
 ///
-/// **見つからなければ既定に落とさず、そこで止める。** 黙って内蔵マイクに
-/// 落ちるのが一番たちが悪い。名前を指定したのに違うマイクで動いていて、
-/// 精度が出ない理由が分からなくなる。
+/// **見つからなくても止めない。** テレビに繋ぎっぱなしの玩具なので、起動
+/// しないほうが困る。会議アプリがデバイスを掴んでいたり、USB を挿し直して
+/// 名前が変わったりで、指定が外れることは普通に起きる。
+///
+/// ただし**黙って落ちない。** 名前を指定したのに違うマイクで動いていて
+/// 精度が出ない、というのが一番たちが悪い。見えているものを並べて出す。
 fn input_device(cfg: &Listen) -> Result<cpal::Device> {
-    let host = cpal::default_host();
-    let Some(want) = cfg.device() else {
-        return host.default_input_device().context("入力デバイスがない");
+    let default = || {
+        cpal::default_host()
+            .default_input_device()
+            .context("入力デバイスがない")
     };
-    let found = host
-        .input_devices()?
-        .find(|d| d.name().is_ok_and(|name| name.contains(want)));
-    match found {
-        Some(device) => Ok(device),
-        None => {
-            let names: Vec<String> = host
-                .input_devices()?
-                .filter_map(|d| d.name().ok())
-                .collect();
-            anyhow::bail!(
-                "入力デバイスが見つからない: {want}\n  見えているもの: {}",
-                if names.is_empty() {
-                    "（無し）".to_string()
-                } else {
-                    names.join(" / ")
+    let Some(want) = cfg.device() else {
+        return default();
+    };
+    // **一度の列挙で名前まで集める。** 二度目を回すと、そちらが失敗した
+    // ときに既定があるのに落ちる（USB を抜き挿しした直後などに起きる）。
+    // 列挙そのものができないときも、既定に任せて続ける。
+    let mut found = None;
+    let mut names: Vec<String> = Vec::new();
+    match cpal::default_host().input_devices() {
+        Ok(devices) => {
+            for d in devices {
+                let Ok(name) = d.name() else { continue };
+                if found.is_none() && name.contains(want) {
+                    found = Some(d);
                 }
-            )
+                names.push(name);
+            }
         }
+        Err(e) => eprintln!("  ⚠ 入力デバイスを列挙できない: {e}"),
+    }
+    if let Some(device) = found {
+        return Ok(device);
+    }
+
+    eprintln!("  ⚠ 指定した入力デバイスが見つからない: {want}");
+    eprintln!(
+        "    見えているもの: {}",
+        if names.is_empty() {
+            "（無し）".to_string()
+        } else {
+            names.join(" / ")
+        }
+    );
+    eprintln!("    OS の既定で続ける。精度が出ないときはこの行を疑うこと。");
+    default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 発話の判定はこの値だけを見る。ここが狂うと、しきい値をどう振っても
+    /// 取りこぼすか誤発火するかになる。
+    #[test]
+    fn rms_measures_loudness_not_peaks() {
+        assert_eq!(rms(&[]), 0.0);
+        assert_eq!(rms(&[0.0, 0.0]), 0.0);
+        assert!((rms(&[1.0, -1.0]) - 1.0).abs() < 1e-6);
+        // 単発の尖りはピークなら 1.0 になるが、均すと小さい。
+        // ピークで見ていた頃はここでノイズに引っ張られていた。
+        let spike = rms(&[0.0, 0.0, 0.0, 1.0]);
+        assert!(spike < 0.51, "単発のノイズに引っ張られている: {spike}");
+    }
+
+    /// **上限が無かった頃は朝まで待つと数百MBになった。** ストリームは
+    /// 開きっぱなしなので、「もう1回」を待っている間も溜まり続ける。
+    #[test]
+    fn the_buffer_stays_bounded_while_nobody_is_listening() {
+        const CAP: usize = 100;
+        let mut buf = Vec::new();
+        // コールバックが刻んで積むのを真似る。
+        for round in 0..1_000 {
+            buf.extend((0..7).map(|i| (round * 7 + i) as f32));
+            trim(&mut buf, CAP);
+            assert!(buf.len() <= CAP * 2, "上限を超えた: {}", buf.len());
+        }
+        // 捨てるのは古いほう。最後に積んだ値が残っていること。
+        assert_eq!(*buf.last().unwrap(), 6_999.0);
+
+        // 一度に大量に来ても収まる。
+        let mut burst: Vec<f32> = (0..10_000).map(|i| i as f32).collect();
+        trim(&mut burst, CAP);
+        assert_eq!(burst.len(), CAP);
+        assert_eq!(burst[0], 9_900.0);
+    }
+
+    #[test]
+    fn resample_keeps_the_signal_and_changes_the_length() {
+        // 同じレートなら素通し。
+        let same = resample(&[0.1, 0.2, 0.3], 16_000, 16_000);
+        assert_eq!(same, [0.1, 0.2, 0.3]);
+        // 空も落ちない。
+        assert!(resample(&[], 48_000, 16_000).is_empty());
+        // 48k → 16k は 1/3 の長さ。
+        let down = resample(&[0.0; 300], 48_000, 16_000);
+        assert_eq!(down.len(), 100);
+        // 16k → 48k は3倍。線形補間なので端の値は保たれる。
+        let up = resample(&[0.0, 1.0], 16_000, 48_000);
+        assert_eq!(up.len(), 6);
+        assert_eq!(up[0], 0.0);
     }
 }

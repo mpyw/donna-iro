@@ -6,7 +6,7 @@ use crate::app::Control;
 pub struct Never;
 
 impl Control for Never {
-    fn wait(&mut self) -> bool {
+    fn wait_for_again(&mut self) -> bool {
         false
     }
 }
@@ -17,6 +17,6 @@ mod tests {
 
     #[test]
     fn never_ends_immediately() {
-        assert!(!Never.wait());
+        assert!(!Never.wait_for_again());
     }
 }

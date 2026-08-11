@@ -1,15 +1,15 @@
 //! マイクと whisper による `Listener`。本番はこちら。
 
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::app::color::Answer;
-use crate::app::Listener;
+use crate::app::{Heard, Listener};
 use crate::config::Config;
 use crate::io::audio::{Ears, WHISPER_SR};
-use const_for::const_for;
 
 /// モデルも状態も起動時に一度だけ作る。
 ///
@@ -21,60 +21,20 @@ pub struct Mic {
     audio_ctx: i32,
 }
 
-/// 語彙を繋ぐ区切りと、末尾。
-const JOIN: &str = "、";
-const END: &str = "。";
-
-/// `VOCABULARY` のバイト長。読み＋区切り＋末尾。
-const fn vocabulary_len() -> usize {
-    let every = Answer::every();
-    let mut n = 0;
-    const_for!(i in 0..Answer::COUNT => {
-        n += every[i].reading().len();
-        if i + 1 < Answer::COUNT {
-            n += JOIN.len();
-        }
-    });
-    n + END.len()
-}
-
-/// `src` を `dst` の `at` から書き、次に書ける位置を返す。
+/// `initial_prompt` に渡す語彙。読みを「、」で繋いで「。」で閉じる。
 ///
-/// const では `copy_from_slice` が使えないので手で回す。3箇所で同じ
-/// ことをするので括り出してある。
-const fn put(dst: &mut [u8], at: usize, src: &[u8]) -> usize {
-    const_for!(i in 0..src.len() => {
-        dst[at + i] = src[i];
-    });
-    at + src.len()
-}
-
-/// 実体。`from_utf8` に渡すために、先に置き場所を用意する。
-static VOCABULARY_BYTES: [u8; vocabulary_len()] = {
-    let every = Answer::every();
-    let mut out = [0u8; vocabulary_len()];
-    let mut n = 0;
-    const_for!(i in 0..Answer::COUNT => {
-        n = put(&mut out, n, every[i].reading().as_bytes());
-        if i + 1 < Answer::COUNT {
-            n = put(&mut out, n, JOIN.as_bytes());
-        }
-    });
-    put(&mut out, n, END.as_bytes());
-    out
-};
-
-/// 認識対象の語をひらがなで並べた文。
-///
-/// これを与えないと whisper が漢字に変換してしまう。実際に
-/// 「むらさき」が「村先」になった。同音の漢字は無限にあるので、
-/// 読みを足していく方式では追いつかない。出力そのものを寄せる。
+/// これを与えないと whisper が漢字に変換してしまう。実際に「むらさき」が
+/// 「村先」になった。同音の漢字は無限にあるので、読みを足していく方式では
+/// 追いつかない。出力そのものを寄せる。
 ///
 /// 語彙は `Answer` から出るので、色を足せばここも伸びる。
-const VOCABULARY: &str = match std::str::from_utf8(&VOCABULARY_BYTES) {
-    Ok(s) => s,
-    Err(_) => panic!("語彙は UTF-8 のはず"),
-};
+///
+/// **const で組んでいた時期もあったが、起動時に一度作るだけのものに
+/// バイト操作50行と、それを検証するテストは重すぎた。**
+static VOCABULARY: LazyLock<String> = LazyLock::new(|| {
+    let readings: Vec<&str> = Answer::every().iter().map(|a| a.reading()).collect();
+    readings.join("、") + "。"
+});
 
 impl Mic {
     pub fn new(ears: Ears, cfg: &Config) -> Result<Self> {
@@ -84,11 +44,12 @@ impl Mic {
 
         let ctx = load_model(cfg)?;
         let state = ctx.create_state()?;
-        eprintln!("  語彙: {VOCABULARY}");
+        eprintln!("  語彙: {}", *VOCABULARY);
         Ok(Self {
             state,
             ears,
-            audio_ctx: cfg.recognize.audio_ctx.clamp(128, 1500),
+            // 範囲は config の検証で保証されている。ここで黙って直さない。
+            audio_ctx: cfg.recognize.audio_ctx,
         })
     }
 
@@ -100,7 +61,7 @@ impl Mic {
         params.set_language(Some("ja"));
         // 出てくる語をあらかじめ教えて、漢字変換や言い換えを抑える。
         // no_context とは独立に効く（prompt_tokens 経由）。
-        params.set_initial_prompt(VOCABULARY);
+        params.set_initial_prompt(&VOCABULARY);
         params.set_translate(false);
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -131,7 +92,13 @@ impl Mic {
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
 
-        self.state.full(params, pcm).ok()?;
+        // 認識そのものが失敗したら、黙って「言わなかった」に倒れる。
+        // ランダムな色に倒す設計は正しいが、恒常的に壊れていても気づけない
+        // のは別問題なので、ここだけは出す。
+        if let Err(e) = self.state.full(params, pcm) {
+            eprintln!("  認識に失敗: {e}");
+            return None;
+        }
 
         // 0.16 では full_n_segments() は i32 を直接返し、
         // テキストは get_segment() で取り出す。
@@ -155,11 +122,15 @@ impl Mic {
 }
 
 impl Listener for Mic {
-    fn hear(&mut self, max: Duration) -> Result<Option<String>> {
-        match self.ears.listen(max)? {
-            Some(pcm) => Ok(self.transcribe(&pcm)),
-            None => Ok(None),
-        }
+    fn hear(&mut self, max: Duration) -> Result<Heard> {
+        // マイクは絶えない。聞こえなければ「言わなかった」。
+        let Some(pcm) = self.ears.listen(max)? else {
+            return Ok(Heard::Nothing);
+        };
+        Ok(match self.transcribe(&pcm) {
+            Some(text) => Heard::Said(text),
+            None => Heard::Nothing,
+        })
     }
 }
 
@@ -194,21 +165,6 @@ fn load_model(cfg: &Config) -> Result<WhisperContext> {
         let path = "models/ggml-base.bin";
         WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .with_context(|| format!("モデルを読めない: {path}（tools/fetch-model.sh で取得）"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// const で組み立てているので、中身がずれても型は通ってしまう。
-    /// 元の実装（実行時に join する形）と突き合わせる。
-    #[test]
-    fn vocabulary_lists_every_reading() {
-        let words: Vec<&str> = Answer::every().iter().map(|a| a.reading()).collect();
-        assert_eq!(VOCABULARY, words.join(JOIN) + END);
-        // 色を足したら伸びる。取りこぼすと whisper が漢字に化ける。
-        assert_eq!(VOCABULARY.matches(JOIN).count(), Answer::COUNT - 1);
     }
 }
 

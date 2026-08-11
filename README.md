@@ -47,6 +47,10 @@ cargo build --release
 | `--keyboard` | マイクの代わりに手打ち |
 | `--once` | フィナーレで終わる。「もう1回」を待たない |
 | `--config <path>` | 別の設定ファイルを読む（既定はカレントの `config.toml`） |
+| `--help` | 使い方 |
+
+知らない引数と、値の無い `--config` はエラーで止まる。`--config` に指定した
+ファイルが無いときも同じ。**指定したのに効いていない、が一番たちが悪い。**
 
 つまみは全部 `config.toml` にある。**同じ項目は環境変数でも上書きでき、名前は
 キーの位置から機械的に決まる。** 接頭辞は `DONNA_IRO_`、節とキーの区切りは
@@ -303,7 +307,7 @@ macOS ではウィンドウをメインスレッドに置く必要があり、`c
 
 | | |
 | --- | --- |
-| `tools/check.sh` | 全 feature の組み合わせでコンパイル・テスト・書式を確かめる |
+| `tools/check.sh` | 全 feature の組み合わせでコンパイル・テスト・書式と、ラズパイ側の依存を確かめる |
 | `tools/fetch-model.sh` | whisper のモデルを取得 |
 | `tools/bundle-mac.sh` | macOS の `.app` を作る（Metal + 埋め込み） |
 | `tools/split_score.py` | 元譜面から素材ごとの MusicXML を切り出す |

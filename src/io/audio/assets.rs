@@ -10,6 +10,8 @@ use anyhow::{Context, Result};
 use const_for::const_for;
 
 use crate::app::cue::Cue;
+
+use super::Clip;
 use crate::config::Config;
 
 /// ファイルから読むか、バイナリに埋め込んだものを読むか。
@@ -72,7 +74,12 @@ fn asset_dir_override() -> Option<PathBuf> {
 /// 在処を決めただけで先に進むと、足りないことに気づくのが遊んでいる最中に
 /// なる。決めることと確かめることは離しても意味が無いので、ひとつにまとめる。
 pub fn configure(cfg: &Config) -> Result<()> {
-    let _ = OVERRIDE.set(cfg.paths.assets());
+    // **黙って捨てない。** 二度目の `set` は失敗するだけで、指定した在処は
+    // 効かないまま先へ進む。`--config` で音源のディレクトリを差し替えたのに
+    // 前のまま鳴る、という形で出る。
+    if OVERRIDE.set(cfg.paths.assets()).is_err() {
+        anyhow::bail!("素材の在処はもう決まっている（configure は起動時に一度だけ）");
+    }
     check_assets()
 }
 
@@ -114,7 +121,9 @@ fn complete(dir: &Path) -> bool {
 
 /// 音源をバイナリに埋め込む。ラズパイに1ファイル置くだけで動かせる。
 ///
-///     cargo build --release --features embed-audio
+/// ```text
+/// cargo build --release --features embed-audio
+/// ```
 ///
 /// `include_bytes!` はコンパイル時にファイルを要求するので、
 /// 音源が揃うまではこのフィーチャーを有効にできない。
@@ -195,19 +204,31 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
 /// 素材が揃っているか確かめる。足りないものはまとめて出す。
 ///
 /// 在処が決まっていることが前提なので、`configure` からしか呼ばない。
+///
+/// **開けるかどうかだけでなく、実際に復号する。** 開けるが壊れている wav は
+/// 開くだけの検査を素通りして、鳴らそうとした時点で初めて落ちる。それでは
+/// 「遊んでいる最中に落ちない」を保証したことにならない。
 fn check_assets() -> Result<()> {
-    let missing: Vec<&str> = Cue::every()
-        .into_iter()
-        .filter(|&c| Media::open(c).is_err())
-        .map(|c| c.stem())
-        .collect();
-    if missing.is_empty() {
+    // **「無い」と「壊れている」を丸めない。** 置いてあるのに「足りない」と
+    // 言われると、探す方向を誤る。理由はそのまま出す。
+    let mut bad: Vec<String> = Vec::new();
+    for cue in Cue::every() {
+        match Clip::load(cue) {
+            Ok(clip) if clip.total().is_zero() => {
+                // 切り詰められた wav はヘッダだけ読めて中身が空になる。
+                bad.push(format!("{}: 中身が空", cue.stem()));
+            }
+            Ok(_) => {}
+            Err(e) => bad.push(format!("{}: {e:#}", cue.stem())),
+        }
+    }
+    if bad.is_empty() {
         return Ok(());
     }
     anyhow::bail!(
-        "音源が足りない（{} / {}）: {}",
-        missing.len(),
+        "鳴らせない音源がある（{} / {}）\n  {}",
+        bad.len(),
         Cue::every().len(),
-        missing.join(", ")
+        bad.join("\n  ")
     )
 }

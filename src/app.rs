@@ -23,7 +23,7 @@ mod screen;
 // 遊びの口。`main` と `io` はこの4つを見れば繋げられるので、
 // モジュールを辿らずに書けるようにしておく。
 pub use control::Control;
-pub use listener::Listener;
+pub use listener::{Heard, Listener};
 pub use player::Player;
 pub use screen::{Frame, Screen};
 

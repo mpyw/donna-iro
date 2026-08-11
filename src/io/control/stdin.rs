@@ -11,7 +11,7 @@ use crate::app::Control;
 pub struct Stdin;
 
 impl Control for Stdin {
-    fn wait(&mut self) -> bool {
+    fn wait_for_again(&mut self) -> bool {
         print!("  もう1回？ [Enter=つづける / Ctrl-D=おわり] > ");
         if std::io::stdout().flush().is_err() {
             return false;

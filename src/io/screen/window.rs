@@ -89,7 +89,7 @@ pub fn run(rx: Receiver<Frame>, again: Sender<()>) -> Result<()> {
     Ok(())
 }
 
-pub fn rgb(c: Rgb) -> u32 {
+fn rgb(c: Rgb) -> u32 {
     ((c.0 as u32) << 16) | ((c.1 as u32) << 8) | c.2 as u32
 }
 
@@ -106,7 +106,7 @@ fn paint(buf: &mut [u32], frame: Frame) {
 }
 
 /// 全色を並べる。`shade` で暗くできる。
-pub fn palette(buf: &mut [u32], order: &[Color], shade: f32) {
+fn palette(buf: &mut [u32], order: &[Color], shade: f32) {
     // 4列×3行。テレビで見たときに一番収まりがいい。
     let cols = 4usize;
     let rows = order.len().div_ceil(cols);
@@ -209,9 +209,16 @@ fn text_width(s: &str, px: f32) -> i32 {
 /// 重ねても縁がぎざつかない。
 fn text(buf: &mut [u32], cx: i32, cy: i32, px: f32, s: &str, c: Rgb) {
     let f = font();
-    let line = f.horizontal_line_metrics(px).expect("水平メトリクスが無い");
     // ascent は上、descent は下（負）。字面の中心が cy に来るようずらす。
-    let baseline = cy + ((line.ascent + line.descent) / 2.0) as i32;
+    //
+    // **メトリクスが無くても描く。** ここはメインスレッドなので、落ちると
+    // 遊んでいる最中にウィンドウごと消える。字がすこし上下にずれるだけの
+    // ことに、その値打ちは無い。
+    let baseline = cy
+        + match f.horizontal_line_metrics(px) {
+            Some(line) => ((line.ascent + line.descent) / 2.0) as i32,
+            None => (px * 0.3) as i32,
+        };
 
     let mut pen = cx - text_width(s, px) / 2;
     for ch in s.chars() {
