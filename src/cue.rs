@@ -99,15 +99,22 @@ mod tests {
         assert_eq!(stems.len(), n, "素材名が重複している");
     }
 
-    /// const で受けられること自体が主張なので、const で受ける。
+    /// `every()` は const fn の中で添字を手で進めている。丈は型が見て
+    /// いるので、ここでは**中身が「COMMON のあとに全色」になっているか**を
+    /// 見る。const で受けられること自体も主張なので、const で受ける。
     #[test]
-    fn every_covers_all_colors() {
+    fn every_is_common_then_all_colors() {
         const EVERY: [Cue; Cue::COUNT] = Cue::every();
 
-        assert_eq!(EVERY.len(), 7 + Color::COUNT);
-        // 後半が色ぶん。1つも取りこぼしていない。
+        for (i, &c) in Cue::COMMON.iter().enumerate() {
+            assert_eq!(EVERY[i], c, "前半が COMMON と揃っていない");
+        }
         for (i, &c) in Color::VARIANTS.iter().enumerate() {
-            assert_eq!(EVERY[Cue::COMMON.len() + i], Cue::Color(c));
+            assert_eq!(
+                EVERY[Cue::COMMON.len() + i],
+                Cue::Color(c),
+                "後半に色を取りこぼしている"
+            );
         }
     }
 }
