@@ -161,6 +161,62 @@ impl Paths {
     }
 }
 
+impl Config {
+    /// **起動時に値の筋を通す。** 素材と同じで、遊んでいる最中に気づくのが
+    /// 一番まずい。
+    ///
+    /// 検査しないと、正しい TOML を書いただけで実行時に落ちる。
+    /// `max_seconds` が負なら `Duration::from_secs_f32` が、
+    /// `speech_floor > speech_ceil` なら `clamp` が、聞き取りのたびに
+    /// パニックする。`insert_every = 0` は割り算、`flash_ms = 0` は
+    /// フィナーレのビジーループになる。
+    fn validate(&self) -> Result<()> {
+        let positive = |name: &str, v: f32| -> Result<()> {
+            if v.is_finite() && v > 0.0 {
+                Ok(())
+            } else {
+                anyhow::bail!("{name} は正の有限な数であること（いまは {v}）")
+            }
+        };
+        let not_negative = |name: &str, v: f32| -> Result<()> {
+            if v.is_finite() && v >= 0.0 {
+                Ok(())
+            } else {
+                anyhow::bail!("{name} は0以上の有限な数であること（いまは {v}）")
+            }
+        };
+
+        positive("listen.max_seconds", self.listen.max_seconds)?;
+        positive("listen.speech_ratio", self.listen.speech_ratio)?;
+        not_negative("listen.speech_floor", self.listen.speech_floor)?;
+        not_negative("listen.speech_ceil", self.listen.speech_ceil)?;
+        not_negative("listen.threshold", self.listen.threshold)?;
+        if self.listen.speech_floor > self.listen.speech_ceil {
+            anyhow::bail!(
+                "listen.speech_floor は speech_ceil 以下であること（いまは {} > {}）",
+                self.listen.speech_floor,
+                self.listen.speech_ceil
+            );
+        }
+        if self.game.insert_every == 0 {
+            anyhow::bail!("game.insert_every は1以上であること（0だと割り算で落ちる）");
+        }
+        if self.game.flash_ms == 0 {
+            anyhow::bail!("game.flash_ms は1以上であること（0だとフィナーレが空回りする）");
+        }
+        if self.recognize.head_segments == 0 {
+            anyhow::bail!("recognize.head_segments は1以上であること");
+        }
+        if !(128..=1500).contains(&self.recognize.audio_ctx) {
+            anyhow::bail!(
+                "recognize.audio_ctx は 128〜1500 であること（いまは {}）",
+                self.recognize.audio_ctx
+            );
+        }
+        Ok(())
+    }
+}
+
 /// 環境変数の接頭辞。
 const PREFIX: &str = "DONNA_IRO_";
 /// 節とキーの区切り。キー名に `_` が入るので2本にする。
@@ -175,12 +231,17 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
 
     let mut figment = Figment::from(Serialized::defaults(Config::default()));
     if let Some(p) = &path {
-        figment = figment.merge(Toml::file(p));
+        // **file ではなく file_exact。** file は無いファイルを黙って空の
+        // プロバイダにするので、--config のタイプミスが既定値での起動に
+        // なる。指定したのに効いていないのが一番たちが悪い。
+        figment = figment.merge(Toml::file_exact(p));
     }
     let cfg: Config = figment
         .merge(Env::prefixed(PREFIX).split(NEST))
         .extract()
         .context("設定を読めない")?;
+
+    cfg.validate()?;
 
     if let Some(p) = &path {
         eprintln!("  設定 {}", p.display());

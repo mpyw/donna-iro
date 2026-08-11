@@ -47,6 +47,15 @@ impl Ears {
         let config: cpal::StreamConfig = supported.into();
 
         let buf = Arc::new(Mutex::new(Vec::<f32>::new()));
+
+        // **溜めっぱなしにしない。** ストリームは開きっぱなしなので、
+        // listen() が呼ばれない間も溜まり続ける。「もう1回」の待ちは
+        // 押されるまで無期限なので、上限が無いと際限なく増える。
+        // 16kHz でも毎時 230MB、48kHz なら 0.7GB。テレビに繋ぎっぱなしの
+        // 玩具でそれをやると、朝には起きてこない。
+        //
+        // listen() は頭で捨ててから聞くので、待ちの間のぶんは要らない。
+        let cap = (rate as f32 * (cfg.listen.max().as_secs_f32() + 2.0)) as usize;
         let err = |e| eprintln!("入力ストリームのエラー: {e}");
 
         // チャンネルを混ぜてモノラルにしながら溜める。
@@ -60,6 +69,12 @@ impl Ears {
                         let mut b = buf.lock().unwrap();
                         for frame in data.chunks(channels) {
                             b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
+                        }
+                        // 上限の倍まで伸ばしてからまとめて捨てる。毎回
+                        // 先頭を削ると、そのたびに全体をずらすことになる。
+                        if b.len() > cap * 2 {
+                            let drop = b.len() - cap;
+                            b.drain(..drop);
                         }
                     },
                     err,
@@ -191,7 +206,8 @@ impl Ears {
         if !heard {
             return Ok(None);
         }
-        let raw = self.buf.lock().unwrap().clone();
+        // clone してから resample すると二度写す。持っていく。
+        let raw = std::mem::take(&mut *self.buf.lock().unwrap());
         Ok(Some(resample(&raw, self.rate, WHISPER_SR)))
     }
 }

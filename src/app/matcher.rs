@@ -265,15 +265,18 @@ fn is_separator(c: char) -> bool {
         )
 }
 
-/// カタカナをひらがなに寄せ、空白を落とす。
+/// カタカナをひらがなに寄せる。
 ///
 /// **通すのは認識結果だけ。** 語彙の側は初めから正規形で書く約束なので、
 /// カタカナ表記を並べる必要も、ここを通す必要もない。
 /// 長音符「ー」はカタカナ領域の外なのでそのまま残る。
-/// 句読点は落とさない。`segments` が区切りとして使う。
+///
+/// **空白も句読点も落とさない。** どちらも `segments` が区切りとして使う。
+/// ここで空白を消していた頃は `is_separator` の空白判定が到達せず、
+/// 「あお あか」が「あおあか」に繋がって、部分一致で後ろの色が勝っていた。
+/// 先頭を優先する方針が空白入力で破れる。
 fn normalize(s: &str) -> String {
     s.chars()
-        .filter(|c| !c.is_whitespace())
         .map(|c| {
             let u = c as u32;
             if (0x30A1..=0x30F6).contains(&u) {
@@ -594,6 +597,9 @@ mod tests {
     fn earlier_segment_wins() {
         assert_eq!(find("あか。あお"), c(Color::Red));
         assert_eq!(find("むらさき / みどり"), c(Color::Purple));
+        // 空白も区切り。繋げてしまうと部分一致で後ろの色が勝つ。
+        assert_eq!(find("あお あか"), c(Color::Blue));
+        assert_eq!(find("みどり\tきいろ"), c(Color::Green));
     }
 
     #[test]

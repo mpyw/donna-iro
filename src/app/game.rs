@@ -32,9 +32,9 @@ use crate::app::color::{Answer, Color};
 use crate::app::cue::Cue;
 use crate::app::matcher::Matcher;
 use crate::app::Control;
-use crate::app::Listener;
 use crate::app::Player;
 use crate::app::{Frame, Screen};
+use crate::app::{Heard, Listener};
 use crate::config::Config;
 
 pub struct Game {
@@ -74,7 +74,10 @@ impl Game {
     /// 「続けると言われたか」だけ。
     pub fn run(&mut self) -> Result<()> {
         loop {
-            self.play_through()?;
+            if !self.play_through()? {
+                // 入力が絶えた。「もう1回」を訊く相手がいない。
+                return Ok(());
+            }
             // 待っていることを画面に出してから待つ。黙って止まっていると、
             // 終わったのか固まったのか区別がつかない。
             self.screen.show(Frame::Again);
@@ -88,7 +91,7 @@ impl Game {
     ///
     /// 周回数はここで閉じているので、もう1回のたびに区切りの周期も
     /// 頭から数え直す。前回の続きから間奏が来ると唐突になる。
-    fn play_through(&mut self) -> Result<()> {
+    fn play_through(&mut self) -> Result<bool> {
         self.screen.show(Frame::palette());
         self.player.play(Cue::Intro)?;
 
@@ -105,11 +108,15 @@ impl Game {
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
             self.player.play_until_quiet(Cue::Question)?;
 
-            let heard = self.ears.hear(self.listen_max)?;
-            let answer = heard.as_deref().and_then(|t| self.matcher.find(t));
+            let answer = match self.ears.hear(self.listen_max)? {
+                Heard::Said(text) => self.matcher.find(&text),
+                Heard::Nothing => None,
+                Heard::Closed => return Ok(false),
+            };
 
             if answer == Some(Answer::All) {
-                return self.finale();
+                self.finale()?;
+                return Ok(true);
             }
 
             // 聞き取れなければランダムな色。黙ってはいけない。
@@ -223,11 +230,14 @@ mod tests {
     struct Script(std::vec::IntoIter<Option<&'static str>>);
 
     impl Listener for Script {
-        fn hear(&mut self, _max: Duration) -> Result<Option<String>> {
-            match self.0.next() {
-                Some(answer) => Ok(answer.map(str::to_string)),
-                None => Ok(Some("ぜんぶ".to_string())),
-            }
+        fn hear(&mut self, _max: Duration) -> Result<Heard> {
+            Ok(match self.0.next() {
+                Some(Some(answer)) => Heard::Said(answer.to_string()),
+                Some(None) => Heard::Nothing,
+                // 台本が尽きたら「ぜんぶ」。放っておくとランダムな色で
+                // 回り続けてテストが返らない。
+                None => Heard::Said("ぜんぶ".to_string()),
+            })
         }
     }
 

@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::app::color::Answer;
-use crate::app::Listener;
+use crate::app::{Heard, Listener};
 use crate::config::Config;
 use crate::io::audio::{Ears, WHISPER_SR};
 use const_for::const_for;
@@ -88,7 +88,8 @@ impl Mic {
         Ok(Self {
             state,
             ears,
-            audio_ctx: cfg.recognize.audio_ctx.clamp(128, 1500),
+            // 範囲は config の検証で保証されている。ここで黙って直さない。
+            audio_ctx: cfg.recognize.audio_ctx,
         })
     }
 
@@ -131,7 +132,13 @@ impl Mic {
         params.set_suppress_blank(true);
         params.set_suppress_nst(true);
 
-        self.state.full(params, pcm).ok()?;
+        // 認識そのものが失敗したら、黙って「言わなかった」に倒れる。
+        // ランダムな色に倒す設計は正しいが、恒常的に壊れていても気づけない
+        // のは別問題なので、ここだけは出す。
+        if let Err(e) = self.state.full(params, pcm) {
+            eprintln!("  認識に失敗: {e}");
+            return None;
+        }
 
         // 0.16 では full_n_segments() は i32 を直接返し、
         // テキストは get_segment() で取り出す。
@@ -155,11 +162,15 @@ impl Mic {
 }
 
 impl Listener for Mic {
-    fn hear(&mut self, max: Duration) -> Result<Option<String>> {
-        match self.ears.listen(max)? {
-            Some(pcm) => Ok(self.transcribe(&pcm)),
-            None => Ok(None),
-        }
+    fn hear(&mut self, max: Duration) -> Result<Heard> {
+        // マイクは絶えない。聞こえなければ「言わなかった」。
+        let Some(pcm) = self.ears.listen(max)? else {
+            return Ok(Heard::Nothing);
+        };
+        Ok(match self.transcribe(&pcm) {
+            Some(text) => Heard::Said(text),
+            None => Heard::Nothing,
+        })
     }
 }
 
