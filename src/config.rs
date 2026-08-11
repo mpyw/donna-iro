@@ -54,6 +54,8 @@ pub struct Paths {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Listen {
+    /// 使う入力デバイス。名前の一部で選ぶ。空なら OS の既定。
+    pub device: String,
     /// 応答を待つ上限（秒）。
     pub max_seconds: f32,
     /// 声が途切れてから打ち切るまでの猶予（ミリ秒）。
@@ -93,6 +95,7 @@ pub struct Game {
 impl Default for Listen {
     fn default() -> Self {
         Self {
+            device: String::new(),
             max_seconds: 5.0,
             hangover_ms: 350,
             guard_ms: 200,
@@ -124,6 +127,11 @@ impl Default for Game {
 }
 
 impl Listen {
+    /// 名前で選ぶなら、その一部。空なら OS の既定に任せる。
+    pub fn device(&self) -> Option<&str> {
+        (!self.device.is_empty()).then_some(self.device.as_str())
+    }
+
     pub fn max(&self) -> Duration {
         Duration::from_secs_f32(self.max_seconds)
     }
