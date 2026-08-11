@@ -66,7 +66,6 @@ impl Ears {
 
         let fault = Arc::new(Mutex::new(None::<String>));
 
-        // チャンネルを混ぜてモノラルにしながら溜める。
         // **サンプルの型ごとに呼び分ける。** クロージャで束ねようとすると
         // 最初の型に固定されてしまうので、関数をそのまま呼ぶ。
         let sink = Sink {
@@ -342,18 +341,27 @@ fn input_device(cfg: &Listen) -> Result<cpal::Device> {
     let Some(want) = cfg.device() else {
         return default();
     };
-    let host = cpal::default_host();
-    let found = host
-        .input_devices()?
-        .find(|d| d.name().is_ok_and(|name| name.contains(want)));
+    // **一度の列挙で名前まで集める。** 二度目を回すと、そちらが失敗した
+    // ときに既定があるのに落ちる（USB を抜き挿しした直後などに起きる）。
+    // 列挙そのものができないときも、既定に任せて続ける。
+    let mut found = None;
+    let mut names: Vec<String> = Vec::new();
+    match cpal::default_host().input_devices() {
+        Ok(devices) => {
+            for d in devices {
+                let Ok(name) = d.name() else { continue };
+                if found.is_none() && name.contains(want) {
+                    found = Some(d);
+                }
+                names.push(name);
+            }
+        }
+        Err(e) => eprintln!("  ⚠ 入力デバイスを列挙できない: {e}"),
+    }
     if let Some(device) = found {
         return Ok(device);
     }
 
-    let names: Vec<String> = host
-        .input_devices()?
-        .filter_map(|d| d.name().ok())
-        .collect();
     eprintln!("  ⚠ 指定した入力デバイスが見つからない: {want}");
     eprintln!(
         "    見えているもの: {}",
