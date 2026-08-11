@@ -319,6 +319,7 @@ RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt
 ```
 
 `tools/check.sh` は nightly が入っていればそちらで見る。
+| `tools/cec-probe.sh` | テレビのリモコンが何をどう届けるかを見る（ラズパイをテレビに繋いでから） |
 | `tools/fetch-model.sh` | whisper のモデルを取得 |
 | `tools/bundle-mac.sh` | macOS の `.app` を作る（Metal + 埋め込み） |
 | `tools/split_score.py` | 元譜面から素材ごとの MusicXML を切り出す |
@@ -327,6 +328,8 @@ RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt
 ## ハードウェア
 
 - Raspberry Pi 5（デスクトップ版 OS。コンソール起動だとウィンドウが開けない）
+  - **リモコンに変換器は要らない。** CEC は HDMI の規格そのものなので、
+    テレビと繋がっていれば `/dev/cec0` に出る。変換器が要るのは PC で試すとき
 - USB マイク（離れた場所から拾うなら ReSpeaker 等のマイクアレイ HAT）
 - HDMI でテレビ
 
