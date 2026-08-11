@@ -191,6 +191,47 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 | `game.rs` | 進行 |
 | `main.rs` | 組み立て |
 
+### 依存の層
+
+**覚える規則はひとつだけ。上の層は、自分より下の層しか読まない。**
+
+```
+  ↑ 知っていることが多い
+  │
+5 │  main.rs                            組み立て
+4 │  game.rs                            進行
+3 │  listener.rs                        聞き取り
+2 │  audio.rs                           再生と録音
+1 │  cue.rs    matcher.rs   window.rs   素材 / 判定 / 描画
+0 │  color.rs⇄screen.rs  config.rs  control.rs
+  │
+  ↓ 何も知らない
+```
+
+**全部を知っているのは `main.rs` だけ**で、そこから下るほど視野が狭くなる。
+どこを読めばいいか迷ったら、変えたい振る舞いに一番近い層から入って、
+下に降りることはあっても上に戻ることはない、と思ってよい。
+
+正確な辺は次のとおり。
+
+| 何が | 何を読むか |
+| --- | --- |
+| `main.rs` | `game` `window` `listener` `audio` `control` `screen` `config` |
+| `game.rs` | `listener` `audio` `matcher` `control` `screen` `cue` `color` `config` |
+| `listener.rs` | `audio` `matcher` `color` `config` |
+| `audio.rs` | `cue` `config` |
+| `window.rs` | `screen` `color` |
+| `cue.rs` `matcher.rs` `screen.rs` | `color` |
+| `color.rs` | `screen`（`Rgb` だけ） |
+| `config.rs` `control.rs` | なし |
+
+`config.rs` と `control.rs` は**何にも依存しない**。設定と「もう1回」は、
+遊びの中身を知らなくても成り立つため。
+
+**唯一の例外が `color.rs` ⇄ `screen.rs` の相互参照。** `Rgb` が `screen.rs`
+にあるせいで、色が画面を読んでいる。`Rgb` は色の側の言葉なので `color.rs`
+に移せば輪は解けて、依存はきれいな一方向になる。
+
 macOS ではウィンドウをメインスレッドに置く必要があり、`cpal::Stream` も
 `rodio::OutputStream` も `!Send` なので、**ゲーム側をワーカースレッドに出して
 メインスレッドは描画に専念**する。再生や認識でウィンドウが固まらない。
