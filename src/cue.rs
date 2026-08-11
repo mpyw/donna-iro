@@ -7,7 +7,7 @@ use strum::{EnumCount, VariantArray};
 
 use crate::color::Color;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount)]
 pub enum Cue {
     /// イントロ。最初に一度だけ。
     Intro,
@@ -32,7 +32,14 @@ impl Cue {
     ///
     /// 色と違って読みや RGB のような付随情報が無く、名前も規則的でない
     /// （`Finale` は `all`、`TailLead` は `tail-lead`）ので、手で並べる。
-    const COMMON: [Cue; 7] = [
+    ///
+    /// **丈は変種の数から出す。** ペイロードを持つのは `Color(Color)` だけ
+    /// なので、そのぶんを引いた数がここに並ぶべき数になる。素材を足して
+    /// ここに書き忘れると、丈が合わずビルドが止まる。
+    ///
+    /// `Cue::COUNT` と書けないのは、固有の const（下の、鳴らせる素材の数）が
+    /// 優先されて循環するため。数えたいのは変種のほうなので名指しする。
+    const COMMON: [Cue; <Cue as EnumCount>::COUNT - 1] = [
         Cue::Intro,
         Cue::Question,
         Cue::Tail,
@@ -42,11 +49,10 @@ impl Cue {
         Cue::Finale,
     ];
 
-    /// 素材の総数。
+    /// 鳴らせる素材の総数。
     ///
-    /// `strum` の `EnumCount` は変種を数えるだけなので、`Cue` に付けても
-    /// `Color(Color)` を1つと数えて 8 になる。欲しいのは鳴らせる素材の数
-    /// なので、色のぶんを展開したこちらを使う。
+    /// `EnumCount` が数えるのは変種なので、`Color(Color)` を1つと数えて
+    /// 8 にしかならない。欲しいのは色を展開した数なのでこちらを持つ。
     pub const COUNT: usize = Self::COMMON.len() + Color::COUNT;
 
     /// 音源のファイル名。`assets/<stem>.wav`。
