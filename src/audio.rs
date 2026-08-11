@@ -17,6 +17,7 @@ use rodio::Source;
 
 use crate::config::{Config, Listen};
 use crate::cue::Cue;
+use crate::player::{Player, Timing};
 
 /// whisper が受け取るサンプリングレート。
 pub const WHISPER_SR: u32 = 16_000;
@@ -29,20 +30,21 @@ const SILENCE: f32 = 0.02;
 
 /// 出力ストリームを持ち回す。再生のたびに開き直すと
 /// デバイスの初期化で無視できない間が空く。
-pub struct Player {
+pub struct Speakers {
     _stream: rodio::OutputStream,
     handle: rodio::OutputStreamHandle,
 }
 
-impl Player {
+impl Speakers {
     pub fn new() -> Result<Self> {
         let (_stream, handle) =
             rodio::OutputStream::try_default().context("出力デバイスを開けない")?;
         Ok(Self { _stream, handle })
     }
+}
 
-    /// 鳴らし終わるまで待つ。
-    pub fn play(&self, cue: Cue) -> Result<()> {
+impl Player for Speakers {
+    fn play(&self, cue: Cue) -> Result<()> {
         std::thread::sleep(self.begin(cue)?.total);
         Ok(())
     }
@@ -55,7 +57,7 @@ impl Player {
     ///
     /// 無音の長さは素材から測る。決め打ちにすると、つくよみちゃんの音源に
     /// 差し替えたときに合わなくなる。
-    pub fn play_until_quiet(&self, cue: Cue) -> Result<()> {
+    fn play_until_quiet(&self, cue: Cue) -> Result<()> {
         std::thread::sleep(self.begin(cue)?.audible);
         Ok(())
     }
@@ -63,7 +65,7 @@ impl Player {
     /// **鳴らし始めて長さだけ返す。待たない。**
     ///
     /// 鳴っている間に画面を動かしたいときに使う。
-    pub fn begin(&self, cue: Cue) -> Result<Timing> {
+    fn begin(&self, cue: Cue) -> Result<Timing> {
         let clip = Clip::load(cue)?;
         let timing = Timing {
             total: clip.total(),
@@ -75,14 +77,6 @@ impl Player {
         sink.detach();
         Ok(timing)
     }
-}
-
-/// 素材の長さ。
-pub struct Timing {
-    /// 末尾の無音まで含めた全長。
-    pub total: Duration,
-    /// 音が鳴り止むまで。
-    pub audible: Duration,
 }
 
 /// 復号済みの音。長さと末尾の無音を測るために一度メモリに載せる。
