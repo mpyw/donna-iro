@@ -1,7 +1,18 @@
-//! 設定の値。**読み込みは `io::config`。**
+//! 設定。**`app` からも `io` からも読んでよい第三の層。**
 //!
-//! 型と既定値だけをここに置く。`app` の側が設定を読むので、ファイルや
-//! 環境変数に触る部分と分けてある。
+//! 遊びの側でも装置の側でも「どう振る舞うか」を決めるのに要るので、
+//! どちらか片方に寄せると必ずもう一方から手が伸びる。型と読み込みを
+//! 割って置いていた時期もあったが、継ぎ目が増えるだけだった。
+//!
+//! **`load` を呼ぶのは `main` だけ。** `app` が触るのは値と既定値で、
+//! ファイルや環境変数を読む側ではない。ここを守っている限り、遊びの側は
+//! 装置なしで組み立てられる。
+//!
+//! 値の出どころは3段。後のものが前を上書きする。
+//!
+//! 1. コード上の既定値（`Default`）
+//! 2. `config.toml`（`--config <path>` か、なければカレントの `config.toml`）
+//! 3. 環境変数
 //!
 //! **環境変数名はキーの位置から機械的に決まる。**
 //! 節とキーの区切りは `__`（2本）。`listen.max_seconds` なら
@@ -11,10 +22,14 @@
 //! 同梱の `config.toml` に全項目と対応する環境変数名が書いてあるので、
 //! どこをいじれるかはそのファイルを見れば分かる。
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result};
+use figment::providers::{Env, Format, Serialized, Toml};
+use figment::Figment;
 use serde::{Deserialize, Serialize};
+
+use std::time::Duration;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -136,4 +151,38 @@ impl Paths {
     pub fn model(&self) -> Option<&str> {
         (!self.model.is_empty()).then_some(self.model.as_str())
     }
+}
+
+/// 環境変数の接頭辞。
+const PREFIX: &str = "DONNA_IRO_";
+/// 節とキーの区切り。キー名に `_` が入るので2本にする。
+const NEST: &str = "__";
+
+/// 既定値 → `config.toml` → 環境変数 の順に重ねる。
+pub fn load(explicit: Option<&Path>) -> Result<Config> {
+    let path = explicit.map(Path::to_path_buf).or_else(|| {
+        let d = PathBuf::from("config.toml");
+        d.exists().then_some(d)
+    });
+
+    let mut figment = Figment::from(Serialized::defaults(Config::default()));
+    if let Some(p) = &path {
+        figment = figment.merge(Toml::file(p));
+    }
+    let cfg: Config = figment
+        .merge(Env::prefixed(PREFIX).split(NEST))
+        .extract()
+        .context("設定を読めない")?;
+
+    if let Some(p) = &path {
+        eprintln!("  設定 {}", p.display());
+    }
+    let overridden: Vec<String> = std::env::vars()
+        .filter_map(|(k, _)| k.strip_prefix(PREFIX).map(str::to_lowercase))
+        .map(|k| k.replace(NEST, "."))
+        .collect();
+    if !overridden.is_empty() {
+        eprintln!("  環境変数で上書き: {}", overridden.join(", "));
+    }
+    Ok(cfg)
 }

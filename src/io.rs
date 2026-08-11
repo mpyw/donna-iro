@@ -7,7 +7,6 @@
 //! **`io` から `app` を読むのは構わない。** 逆はいけない。
 
 pub mod audio;
-pub mod config;
 pub mod control;
 pub mod listener;
 pub mod player;

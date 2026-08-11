@@ -31,11 +31,11 @@ use strum::EnumCount;
 use crate::app::color::{Answer, Color};
 use crate::app::cue::Cue;
 use crate::app::matcher::Matcher;
-use crate::app::Config;
 use crate::app::Control;
 use crate::app::Listener;
 use crate::app::Player;
 use crate::app::{Frame, Screen};
+use crate::config::Config;
 
 pub struct Game {
     player: Box<dyn Player>,
@@ -193,7 +193,7 @@ mod tests {
     use std::rc::Rc;
 
     use crate::app::player::Timing;
-    use crate::app::Config;
+    use crate::config::Config;
 
     /// 鳴らした順を記録するだけ。長さ0なので待ち時間が消える。
     #[derive(Clone, Default)]
