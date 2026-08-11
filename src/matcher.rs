@@ -22,6 +22,7 @@
 use sort_const::const_quicksort;
 
 use crate::color::Answer;
+use crate::consts::for_range;
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -67,27 +68,25 @@ fn skeleton(s: &str) -> Vec<char> {
 /// 漢字表記を持つ応答の数。候補の丈を出すためだけに数える。
 const fn kanji_count() -> usize {
     let every = Answer::every();
-    let (mut n, mut i) = (0, 0);
-    while i < Answer::COUNT {
+    let mut n = 0;
+    for_range!(i in 0..Answer::COUNT => {
         if every[i].kanji().is_some() {
             n += 1;
         }
-        i += 1;
-    }
+    });
     n
 }
 
 /// UTF-8 の文字数。`str::chars` は const で回せないので先頭バイトを数える。
 const fn char_count(s: &str) -> usize {
     let bytes = s.as_bytes();
-    let (mut n, mut i) = (0, 0);
-    while i < bytes.len() {
+    let mut n = 0;
+    for_range!(i in 0..bytes.len() => {
         // 継続バイト（10xxxxxx）以外が1文字の先頭。
         if bytes[i] & 0xC0 != 0x80 {
             n += 1;
         }
-        i += 1;
-    }
+    });
     n
 }
 
@@ -124,20 +123,17 @@ const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
 
     // 3つ目は作った順。並べ替えの second key に使う。
     let mut buf = [(Answer::All, "", 0usize); CANDIDATE_COUNT];
-    let (mut n, mut i) = (0, 0);
-    while i < Answer::COUNT {
+    let mut n = 0;
+    for_range!(i in 0..Answer::COUNT => {
         buf[n] = (every[i], every[i].reading(), n);
         n += 1;
-        i += 1;
-    }
-    let mut i = 0;
-    while i < Answer::COUNT {
+    });
+    for_range!(i in 0..Answer::COUNT => {
         if let Some(k) = every[i].kanji() {
             buf[n] = (every[i], k, n);
             n += 1;
         }
-        i += 1;
-    }
+    });
 
     // 配列を渡すと**その場では並べ替えず、並べ替えたものを返す**。
     // 戻り値を捨てると黙って未整列のまま進むので、必ず受け直すこと。
@@ -145,11 +141,9 @@ const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
 
     // 並べ終わったら位置は要らない。
     let mut out = [(Answer::All, ""); CANDIDATE_COUNT];
-    let mut i = 0;
-    while i < CANDIDATE_COUNT {
+    for_range!(i in 0..CANDIDATE_COUNT => {
         out[i] = (buf[i].0, buf[i].1);
-        i += 1;
-    }
+    });
     out
 };
 

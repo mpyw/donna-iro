@@ -13,6 +13,8 @@
 
 use strum::{EnumCount, VariantArray};
 
+use crate::consts::for_range;
+
 /// 光の三原色。色の言葉なのでここに置く。
 ///
 /// 画面の側（`screen.rs`）に置いていたことがあり、そのせいで色が画面を
@@ -26,11 +28,9 @@ pub type Rgb = (u8, u8, u8);
 const fn lower<const N: usize>(s: &str) -> [u8; N] {
     let bytes = s.as_bytes();
     let mut out = [0u8; N];
-    let mut i = 0;
-    while i < N {
+    for_range!(i in 0..N => {
         out[i] = bytes[i].to_ascii_lowercase();
-        i += 1;
-    }
+    });
     out
 }
 
@@ -234,11 +234,9 @@ impl Answer {
     /// ようにするため。
     pub const fn every() -> [Answer; Self::COUNT] {
         let mut out = [Answer::All; Self::COUNT];
-        let mut i = 0;
-        while i < Color::COUNT {
+        for_range!(i in 0..Color::COUNT => {
             out[i] = Answer::Single(Color::VARIANTS[i]);
-            i += 1;
-        }
+        });
         out
     }
 

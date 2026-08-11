@@ -188,6 +188,7 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 | `listener.rs` | `Listener` トレイト、マイク / キーボード |
 | `control.rs` | `Control` トレイト。フィナーレ後の「もう1回」 |
 | `config.rs` | 設定の読み込み（既定 → `config.toml` → 環境変数） |
+| `consts.rs` | const 文脈で回すための小物（`for_range!`） |
 | `game.rs` | 進行 |
 | `main.rs` | 組み立て |
 
@@ -209,6 +210,7 @@ flowchart TD
     cue["cue.rs"]
     color["color.rs"]
     config["config.rs"]
+    consts["consts.rs"]
 
     main --> game
     main --> window
@@ -239,11 +241,16 @@ flowchart TD
     matcher -.-> color
     screen -.-> color
 
+    color -.-> consts
+    cue -.-> consts
+    matcher -.-> consts
+    listener -.-> consts
+
     classDef base fill:#eee,stroke:#999,color:#333;
-    class color,config base;
+    class color,config,consts base;
 ```
 
-**点線は、どこからでも読まれる土台（`color.rs` と `config.rs`）への依存。**
+**点線は、どこからでも読まれる土台（`color.rs` `config.rs` `consts.rs`）への依存。**
 構造を追いたいときは実線だけ見ればよい。
 
 **全部を知っているのは `main.rs` だけ**で、そこから下るほど視野が狭くなる。
@@ -256,15 +263,17 @@ flowchart TD
 | --- | --- |
 | `main.rs` | `game` `window` `listener` `audio` `control` `screen` `config` |
 | `game.rs` | `listener` `audio` `matcher` `control` `screen` `cue` `color` `config` |
-| `listener.rs` | `audio` `color` `config` |
+| `listener.rs` | `audio` `color` `config` `consts` |
 | `audio.rs` | `cue` `config` |
 | `window.rs` | `screen` `color` |
-| `cue.rs` `matcher.rs` `screen.rs` | `color` |
-| `color.rs` `config.rs` `control.rs` | なし |
+| `cue.rs` `matcher.rs` | `color` `consts` |
+| `screen.rs` | `color` |
+| `color.rs` | `consts` |
+| `consts.rs` `config.rs` `control.rs` | なし |
 
 **例外はない。輪はどこにもなく、依存は完全な一方向。**
 
-`color.rs` `config.rs` `control.rs` は何にも依存しない。色の定義・設定・
+`consts.rs` `config.rs` `control.rs` は何にも依存しない。const の小物・設定・
 「もう1回」は、どれも遊びの中身を知らなくても成り立つため。
 
 `Rgb`（`(u8, u8, u8)`）は `color.rs` にある。以前は `screen.rs` に置いて

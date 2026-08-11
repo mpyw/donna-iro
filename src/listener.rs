@@ -44,6 +44,7 @@ mod mic {
     use crate::audio::{Ears, WHISPER_SR};
     use crate::color::Answer;
     use crate::config::Config;
+    use crate::consts::for_range;
 
     /// モデルも状態も起動時に一度だけ作る。
     ///
@@ -62,14 +63,13 @@ mod mic {
     /// `VOCABULARY` のバイト長。読み＋区切り＋末尾。
     const fn vocabulary_len() -> usize {
         let every = Answer::every();
-        let (mut n, mut i) = (0, 0);
-        while i < Answer::COUNT {
+        let mut n = 0;
+        for_range!(i in 0..Answer::COUNT => {
             n += every[i].reading().len();
             if i + 1 < Answer::COUNT {
                 n += JOIN.len();
             }
-            i += 1;
-        }
+        });
         n + END.len()
     }
 
@@ -78,11 +78,9 @@ mod mic {
     /// const では `copy_from_slice` が使えないので手で回す。3箇所で同じ
     /// ことをするので括り出してある。
     const fn put(dst: &mut [u8], at: usize, src: &[u8]) -> usize {
-        let mut i = 0;
-        while i < src.len() {
+        for_range!(i in 0..src.len() => {
             dst[at + i] = src[i];
-            i += 1;
-        }
+        });
         at + src.len()
     }
 
@@ -90,14 +88,13 @@ mod mic {
     static VOCABULARY_BYTES: [u8; vocabulary_len()] = {
         let every = Answer::every();
         let mut out = [0u8; vocabulary_len()];
-        let (mut n, mut i) = (0, 0);
-        while i < Answer::COUNT {
+        let mut n = 0;
+        for_range!(i in 0..Answer::COUNT => {
             n = put(&mut out, n, every[i].reading().as_bytes());
             if i + 1 < Answer::COUNT {
                 n = put(&mut out, n, JOIN.as_bytes());
             }
-            i += 1;
-        }
+        });
         put(&mut out, n, END.as_bytes());
         out
     };
