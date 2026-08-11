@@ -229,17 +229,19 @@ impl Ears {
             threshold,
             self.threshold()
         );
-        // **入口だけでは足りない。** 窓を開けている最中に抜かれると、
-        // この回は「無言」で返ってランダムな色が1つ鳴り、故障に気づくのが
-        // 次の聞き取りまで遅れる。返す直前にもう一度見る。
+        // 先に結果を作ってから、**最後に**故障を見る。窓を開けている
+        // 最中に抜かれると、この回は「無言」で返ってランダムな色が1つ
+        // 鳴り、気づくのが次の聞き取りまで遅れる。
+        //
+        // 取り出しと変換のあとに置くのは、その間に来たぶんも拾うため。
+        // 完全に消せる競走ではないが、窓は最小になる。
+        let out = heard.then(|| {
+            // clone してから resample すると二度写す。持っていく。
+            let raw = std::mem::take(&mut *self.buf.lock().unwrap());
+            resample(&raw, self.rate, WHISPER_SR)
+        });
         self.check_fault()?;
-
-        if !heard {
-            return Ok(None);
-        }
-        // clone してから resample すると二度写す。持っていく。
-        let raw = std::mem::take(&mut *self.buf.lock().unwrap());
-        Ok(Some(resample(&raw, self.rate, WHISPER_SR)))
+        Ok(out)
     }
 }
 

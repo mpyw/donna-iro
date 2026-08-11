@@ -176,6 +176,10 @@ impl Matcher {
         // 「き、いろ」の「き」は「すき」の一部なので、そのまま捨てると
         // きいろ が丸ごと消える。
         let mut pending = String::new();
+        // 質問がまるごと現れたか。**現れていれば、そのあとの破片は割れた語
+        // ではなく回り込み。** これを見ないと「どんな いろ みじろ」の
+        // 「いろ」まで みじろ にくっついて、みずいろ を取り逃がす。
+        let mut question_seen = false;
 
         for seg in segments(&normalize(raw)) {
             if seg.is_empty() {
@@ -188,6 +192,7 @@ impl Matcher {
                 // 続きではなく質問の続き。** 繋ぎ先を切り、溜めも捨てる。
                 joinable = false;
                 pending.clear();
+                question_seen = true;
                 continue;
             }
             if QUESTION.contains(seg.as_str()) {
@@ -201,6 +206,10 @@ impl Matcher {
                 //
                 // **捨てるのは `truncate` の前でなければならない。** 破片が
                 // 席を占めると、後ろの本当の答えが `head` から押し出される。
+                if parts.is_empty() && question_seen {
+                    // 質問が回り込んでいる最中の破片。繋ぎ先も無い。
+                    continue;
+                }
                 if parts.is_empty() {
                     // 繋ぎ先がまだ無い。溜めておいて、**質問文の一部で
                     // なくなった時点で**実のある区間に昇格させる。
@@ -224,9 +233,16 @@ impl Matcher {
                 }
                 continue;
             }
-            parts.push(seg);
+            // 溜めがあれば、それは割れた語の前半。**繋いでから積む。**
+            // 捨てていた頃は「き みどり」の「き」が消えて みどり になった。
+            parts.push(if pending.is_empty() {
+                seg
+            } else {
+                let mut joined = std::mem::take(&mut pending);
+                joined.push_str(&seg);
+                joined
+            });
             joinable = true;
-            pending.clear();
         }
         // 同じ語の繰り返しは畳む。tiny が出力を繰り返すことがある。
         parts.dedup();
@@ -243,20 +259,44 @@ impl Matcher {
         //
         // 空白が区切りになる前は `normalize` が繋ぎ直していたので、この段の
         // 脆さは読点割れでしか出なかった。
-        //
-        // **結合の部分一致は単独の音の近さより後ろ。** 前に出すと
-        // 「みじろ、きいろ」が結合の部分一致で きいろ になり、幻覚の
-        // 継ぎ足しを捨てる仕掛けが壊れる。
         (0..parts.len()).find_map(|i| {
             let single = parts[i].as_str();
             let joined = (parts.len() - i >= 2).then(|| parts[i..i + 2].concat());
             let joined = joined.as_deref();
-            self.exact(single)
-                .or_else(|| self.substring(single))
-                .or_else(|| joined.and_then(|j| self.exact(j)))
-                .or_else(|| self.nearest(single))
-                .or_else(|| joined.and_then(|j| self.substring(j)))
-                .or_else(|| joined.and_then(|j| self.nearest(j)))
+
+            if let Some(a) = self.exact(single).or_else(|| self.substring(single)) {
+                return Some(a);
+            }
+            if let Some(a) = joined.and_then(|j| self.exact(j)) {
+                return Some(a);
+            }
+
+            // ここから先は音の近さ。**単独が土俵に乗っているかで分かれる。**
+            match self.nearest(single) {
+                // 乗っている。結合と突き合わせて近いほうを採る。距離
+                // そのものが確からしさなので、順番で決めるところではない。
+                //
+                //     「むら さぎ」    むら → くろ d=4 / むらさぎ → むらさき d=1
+                //     「みじろ、きいろ」 みじろ → みずいろ d=4 / 結合 d=10
+                //
+                // 前者は結合、後者は単独。順番を固定すると必ずどちらかを
+                // 外す。同点なら単独。位置を優先する方針に揃える。
+                //
+                // ここで結合の**部分一致**に譲らないのが要点。譲ると
+                // 「みじろ、きいろ」が きいろ になり、幻覚の継ぎ足しを
+                // 捨てる仕掛けが壊れる。
+                Some((sa, sd)) => Some(match joined.and_then(|j| self.nearest(j)) {
+                    Some((ja, jd)) if jd < sd => ja,
+                    _ => sa,
+                }),
+                // 乗っていない。**部分一致のほうが音の近さより確か。**
+                // 「じゃあ どんな いろ が すき みどり」の「じゃあ」は
+                // どの色にも近くないが、「じゃあみどり」は きみどり に
+                // 音だけなら近い。部分一致に先を譲れば みどり が残る。
+                None => joined
+                    .and_then(|j| self.substring(j))
+                    .or_else(|| joined.and_then(|j| self.nearest(j)).map(|(a, _)| a)),
+            }
         })
     }
 
@@ -271,7 +311,7 @@ impl Matcher {
             .map(|(a, _)| *a)
     }
 
-    fn nearest(&self, text: &str) -> Option<Answer> {
+    fn nearest(&self, text: &str) -> Option<(Answer, usize)> {
         // 許容する編集距離。短い読みほど厳しくする。
         //
         // 単位は `substitution` の重みなので、4 が「1音ぶんのずれ」にあたる。
@@ -312,7 +352,7 @@ impl Matcher {
         if scores.get(1).is_some_and(|&(_, d)| d == best_d) {
             return None;
         }
-        Some(best)
+        Some((best, best_d))
     }
 }
 
@@ -692,6 +732,18 @@ mod tests {
         // 単独の音の近さより前に出すと、ここが きいろ になる。
         assert_eq!(find("みじろ、きいろ"), c(Color::LightBlue));
         assert_eq!(find("どんな いろ みじろ"), c(Color::LightBlue));
+
+        // **割れたうえに一音ずれると、結合しても完全一致には届かない。**
+        // 単独と結合を突き合わせて近いほうを採る。
+        //   むら → くろ d=4 / むらさぎ → むらさき d=1
+        assert_eq!(find("むら さぎ"), c(Color::Purple));
+
+        // 溜めた破片は、次が質問の続きでなくても繋ぐ。捨てていた頃は
+        // 「き」が消えて みどり になった。
+        assert_eq!(find("き みどり"), c(Color::YellowGreen));
+        assert_eq!(find("き み どり"), c(Color::YellowGreen));
+        // ぜんぶ も割れる。ここを取りこぼすと遊びが終われない。
+        assert_eq!(find("ぜん ぶ"), Some(Answer::All));
     }
 
     #[test]
@@ -775,6 +827,113 @@ mod tests {
                  このままだと聞き取れても捨てられる"
             );
         }
+    }
+
+    /// 【レビュー用の一時テスト。あとで消す】大量の入力で誤判定を洗う。
+    #[test]
+    fn stress_review() {
+        let m = Matcher::new(2);
+        let readings: Vec<(&'static str, Answer)> =
+            Answer::every().iter().map(|a| (a.reading(), *a)).collect();
+        let mut bad: Vec<String> = Vec::new();
+        let mut n = 0usize;
+        let mut check = |input: &str, expect: Option<Answer>| {
+            n += 1;
+            let got = m.find(input);
+            if got != expect {
+                bad.push(format!("{input:?} -> {got:?} (expect {expect:?})"));
+            }
+        };
+
+        // 1. 読みを2つに割る（全分割点 × 区切り2種）
+        for (r, a) in &readings {
+            let cs: Vec<char> = r.chars().collect();
+            for i in 1..cs.len() {
+                for sep in [" ", "、"] {
+                    let s = format!(
+                        "{}{sep}{}",
+                        cs[..i].iter().collect::<String>(),
+                        cs[i..].iter().collect::<String>()
+                    );
+                    check(&s, Some(*a));
+                }
+            }
+        }
+        // 2. 読みを3つに割る（全分割点の組）
+        for (r, a) in &readings {
+            let cs: Vec<char> = r.chars().collect();
+            for i in 1..cs.len() {
+                for j in i + 1..cs.len() {
+                    let s = format!(
+                        "{} {} {}",
+                        cs[..i].iter().collect::<String>(),
+                        cs[i..j].iter().collect::<String>(),
+                        cs[j..].iter().collect::<String>()
+                    );
+                    check(&s, Some(*a));
+                }
+            }
+        }
+        // 3. 質問の回り込み・フィラーの後ろに答え
+        for (r, a) in &readings {
+            for echo in [
+                "どんな いろ",
+                "どんな いろ が すき",
+                "どんないろがすき",
+                "じゃあ どんな いろ",
+                "いろ",
+                "すき",
+                "いろ が すき",
+                "いろ すき",
+                "えー",
+                "うーん",
+                "じゃあ",
+                "えーと",
+            ] {
+                check(&format!("{echo} {r}"), Some(*a));
+            }
+        }
+        // 4. フィラー・回り込みの後ろに、割れた答え
+        for (r, a) in &readings {
+            let cs: Vec<char> = r.chars().collect();
+            for i in 1..cs.len() {
+                for echo in ["えー", "じゃあ", "どんな いろ", "どんな いろ が すき"]
+                {
+                    let s = format!(
+                        "{echo} {} {}",
+                        cs[..i].iter().collect::<String>(),
+                        cs[i..].iter().collect::<String>()
+                    );
+                    check(&s, Some(*a));
+                }
+            }
+        }
+        // 5. 幻覚の継ぎ足し（全ペア）: 先頭が勝つこと
+        for (r, a) in &readings {
+            for (r2, _) in &readings {
+                if r != r2 {
+                    check(&format!("{r}、{r2}"), Some(*a));
+                    check(&format!("{r} {r2}"), Some(*a));
+                }
+            }
+        }
+        // 6. 質問の破片だけなら None
+        for echo in [
+            "どんな いろ",
+            "いろ",
+            "すき",
+            "どんな いろ が すき",
+            "いろ が",
+            "が すき",
+            "どんな",
+        ] {
+            check(echo, None);
+        }
+
+        for b in &bad {
+            eprintln!("  NG: {b}");
+        }
+        eprintln!("  {} / {n} 件が期待と違う", bad.len());
     }
 
     #[test]
