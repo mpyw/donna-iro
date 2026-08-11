@@ -23,6 +23,10 @@ window = ["dep:minifb", "dep:fontdue"]
 # 両方入れると 1ファイル置くだけで、音源もモデルも要らずに動く。
 # モデル（base）だけで 141MB あるので、それなりの大きさにはなる。
 embed-audio = []
+# 本番音源の代わりに確認用の合成音を埋め込む。実行時のフォールバックは
+# 埋め込みに効かない（include_bytes! はファイルの有無を見られない）ので、
+# .app を試しに作りたいときはこちらで切り替える。
+embed-reference = ["embed-audio"]
 embed-model = []
 embed = ["embed-audio", "embed-model"]
 # --- 認識の加速 ---
