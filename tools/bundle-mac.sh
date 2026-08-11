@@ -21,14 +21,26 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 # 素材の一覧はここに持たない。足りないものは include_bytes! が
 # ファイル名つきでコンパイル時に落とすし、表への並べ忘れも const の検査で
 # 止まる（audio.rs）。ここで並べると、色を足すたびに直す場所が増えるだけ。
+#
+# 本番音源が無ければ確認用の合成音で組む。実行時と違って埋め込みには
+# フォールバックが効かないので、ここで選ぶ。assets/ にコピーする手も
+# あるが、あそこは private サブモジュールなので汚したくない。
+FEATURES=embed
+if ! ls assets/*.wav >/dev/null 2>&1; then
+  if ls assets/reference/*.wav >/dev/null 2>&1; then
+    echo "本番音源が無いので、確認用の合成音を埋め込みます（assets/reference/）" >&2
+    FEATURES=embed,embed-reference
+  fi
+fi
+
 echo "ビルド中（Metal は macOS で既定有効。whisper.cpp を組み直すので数分かかります）"
-if ! cargo build --release --features embed; then
+if ! cargo build --release --features "$FEATURES"; then
   echo >&2
   echo ".app にするには音源とモデルを埋め込む必要があります（CWD が / になるため）。" >&2
   echo "上のエラーに足りないファイル名が出ています。" >&2
   echo >&2
-  echo "つくよみちゃんの音源がまだなら、確認用の合成音で代用できます:" >&2
-  echo "  for f in assets/reference/*.wav; do cp \"\$f\" assets/; done" >&2
+  echo "音源は:" >&2
+  echo "  git -C assets lfs pull" >&2
   echo "モデルは:" >&2
   echo "  tools/fetch-model.sh" >&2
   exit 1

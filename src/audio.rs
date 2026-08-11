@@ -238,9 +238,17 @@ fn complete(dir: &Path) -> bool {
 /// バイナリ1つで完結する。
 #[cfg(feature = "embed-audio")]
 macro_rules! table {
-    ($($name:literal),* $(,)?) => {
+    // 素材の一覧はここ1箇所。ディレクトリだけ差し替えられるようにしてある。
+    ($dir:literal) => {
+        table!(@ $dir,
+            "intro", "question", "tail", "tail-lead", "bridge", "interlude", "all",
+            "red", "blue", "yellow", "green", "yellowgreen", "white", "black",
+            "pink", "orange", "purple", "brown", "lightblue",
+        )
+    };
+    (@ $dir:literal, $($name:literal),* $(,)?) => {
         &[$(($name, include_bytes!(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/assets/", $name, ".wav")
+            concat!(env!("CARGO_MANIFEST_DIR"), $dir, $name, ".wav")
         ) as &'static [u8])),*]
     };
 }
@@ -249,29 +257,16 @@ macro_rules! table {
 ///
 /// `include_bytes!` はリテラルのパスしか受け付けないので、`Cue::stem()` の
 /// ように導くことができない。実体が無ければここで落ちるが、素材を足して
-/// ここに書き忘れるほうは下の検査で見る。
-#[cfg(feature = "embed-audio")]
-const FILES: &[(&str, &[u8])] = table![
-    "intro",
-    "question",
-    "tail",
-    "tail-lead",
-    "bridge",
-    "interlude",
-    "all",
-    "red",
-    "blue",
-    "yellow",
-    "green",
-    "yellowgreen",
-    "white",
-    "black",
-    "pink",
-    "orange",
-    "purple",
-    "brown",
-    "lightblue",
-];
+/// 表に書き忘れるほうは下の検査で見る。
+///
+/// 本番音源が無い状態で `.app` を作りたいときのために、`embed-reference` で
+/// 確認用の合成音を埋め込める。**実行時のフォールバック（`asset_dir()` が
+/// `assets/reference/` に落ちる）は埋め込みには効かない。** `include_bytes!`
+/// はファイルの有無を見られないので、こちらは手で切り替えるしかない。
+#[cfg(all(feature = "embed-audio", not(feature = "embed-reference")))]
+const FILES: &[(&str, &[u8])] = table!("/assets/");
+#[cfg(feature = "embed-reference")]
+const FILES: &[(&str, &[u8])] = table!("/assets/reference/");
 
 /// const で使う文字列の等値。`==` は const で回せない。
 #[cfg(feature = "embed-audio")]
