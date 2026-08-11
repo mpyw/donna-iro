@@ -10,6 +10,8 @@ use anyhow::{Context, Result};
 use const_for::const_for;
 
 use crate::app::cue::Cue;
+
+use super::Clip;
 use crate::config::Config;
 
 /// ファイルから読むか、バイナリに埋め込んだものを読むか。
@@ -195,10 +197,16 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
 /// 素材が揃っているか確かめる。足りないものはまとめて出す。
 ///
 /// 在処が決まっていることが前提なので、`configure` からしか呼ばない。
+///
+/// **開けるかどうかだけでなく、実際に復号する。** 開けるが壊れている wav は
+/// 開くだけの検査を素通りして、鳴らそうとした時点で初めて落ちる。それでは
+/// 「遊んでいる最中に落ちない」を保証したことにならない。
 fn check_assets() -> Result<()> {
+    // 復号できて、かつ音が入っていること。切り詰められた wav はヘッダだけ
+    // 読めて中身が空、ということがある。
     let missing: Vec<&str> = Cue::every()
         .into_iter()
-        .filter(|&c| Media::open(c).is_err())
+        .filter(|&c| !Clip::load(c).is_ok_and(|clip| !clip.total().is_zero()))
         .map(|c| c.stem())
         .collect();
     if missing.is_empty() {

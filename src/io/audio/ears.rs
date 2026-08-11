@@ -270,3 +270,37 @@ fn input_device(cfg: &Listen) -> Result<cpal::Device> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 発話の判定はこの値だけを見る。ここが狂うと、しきい値をどう振っても
+    /// 取りこぼすか誤発火するかになる。
+    #[test]
+    fn rms_measures_loudness_not_peaks() {
+        assert_eq!(rms(&[]), 0.0);
+        assert_eq!(rms(&[0.0, 0.0]), 0.0);
+        assert!((rms(&[1.0, -1.0]) - 1.0).abs() < 1e-6);
+        // 単発の尖りはピークなら 1.0 になるが、均すと小さい。
+        // ピークで見ていた頃はここでノイズに引っ張られていた。
+        let spike = rms(&[0.0, 0.0, 0.0, 1.0]);
+        assert!(spike < 0.51, "単発のノイズに引っ張られている: {spike}");
+    }
+
+    #[test]
+    fn resample_keeps_the_signal_and_changes_the_length() {
+        // 同じレートなら素通し。
+        let same = resample(&[0.1, 0.2, 0.3], 16_000, 16_000);
+        assert_eq!(same, [0.1, 0.2, 0.3]);
+        // 空も落ちない。
+        assert!(resample(&[], 48_000, 16_000).is_empty());
+        // 48k → 16k は 1/3 の長さ。
+        let down = resample(&[0.0; 300], 48_000, 16_000);
+        assert_eq!(down.len(), 100);
+        // 16k → 48k は3倍。線形補間なので端の値は保たれる。
+        let up = resample(&[0.0, 1.0], 16_000, 48_000);
+        assert_eq!(up.len(), 6);
+        assert_eq!(up[0], 0.0);
+    }
+}

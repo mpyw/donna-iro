@@ -41,7 +41,7 @@ pub struct Game {
     player: Box<dyn Player>,
     screen: Box<dyn Screen>,
     matcher: Matcher,
-    ears: Box<dyn Listener>,
+    listener: Box<dyn Listener>,
     control: Box<dyn Control>,
     listen_max: Duration,
     insert_every: u32,
@@ -51,7 +51,7 @@ pub struct Game {
 impl Game {
     pub fn new(
         player: Box<dyn Player>,
-        ears: Box<dyn Listener>,
+        listener: Box<dyn Listener>,
         screen: Box<dyn Screen>,
         control: Box<dyn Control>,
         cfg: &Config,
@@ -60,7 +60,7 @@ impl Game {
             player,
             screen,
             matcher: Matcher::new(cfg.recognize.head_segments),
-            ears,
+            listener,
             control,
             listen_max: cfg.listen.max(),
             insert_every: cfg.game.insert_every,
@@ -108,7 +108,7 @@ impl Game {
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
             self.player.play_until_quiet(Cue::Question)?;
 
-            let answer = match self.ears.hear(self.listen_max)? {
+            let answer = match self.listener.hear(self.listen_max)? {
                 Heard::Said(text) => self.matcher.find(&text),
                 Heard::Nothing => None,
                 Heard::Closed => return Ok(false),

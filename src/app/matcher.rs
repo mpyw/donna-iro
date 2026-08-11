@@ -143,7 +143,15 @@ pub struct Matcher {
 impl Matcher {
     pub fn new(head: usize) -> Self {
         Self {
-            skeletons: CANDIDATES.iter().map(|(a, r)| (*a, skeleton(r))).collect(),
+            // **骨格は読みだけ。** 漢字は `decompose` できず全文字が
+            // 満額の置換になるので、音の近さの土俵に乗らない。無駄な
+            // 距離計算になるうえ、同点（→ 諦める）の芽にもなる。
+            // 漢字は完全一致と部分一致の2段で拾えている。
+            skeletons: CANDIDATES
+                .iter()
+                .filter(|(a, r)| a.kanji() != Some(*r))
+                .map(|(a, r)| (*a, skeleton(r)))
+                .collect(),
             head: head.max(1),
         }
     }
@@ -190,10 +198,10 @@ impl Matcher {
         // **「ぜんぶ」だけは1音までに絞る。** 誤検出するとゲームが終わって
         // しまうため。緩めると「でんわ」あたりが引っかかる。
         // 逆に取りこぼしても次の周回でまた聞けるので、そちらの害は小さい。
-        const fn allowed(answer: Answer, reading_len: usize) -> usize {
+        const fn allowed(answer: Answer, skeleton_len: usize) -> usize {
             match answer {
                 Answer::All => 4,
-                Answer::Single(_) if reading_len <= 2 => 4,
+                Answer::Single(_) if skeleton_len <= 2 => 4,
                 Answer::Single(_) => 6,
             }
         }
@@ -392,7 +400,11 @@ fn substitution(a: char, b: char) -> usize {
     }
 }
 
-/// 挿入・削除の重み。置換の最大と揃えて、
+/// 挿入・削除の重み。1音まるごとのずれを 4 とする目盛りに合わせる。
+/// 置換の最大は 5（子音の消失3＋母音違い2）なので、そちらのほうが
+/// わずかに高い。つまり同じ長さなら置換より挿入＋削除を選びにくい。
+///
+/// もとの意図は、
 /// 「1音ぶんのずれ」がどの操作でも同じ値になるようにする。
 const INDEL: usize = 4;
 

@@ -55,7 +55,10 @@ pub struct Paths {
 #[serde(default, deny_unknown_fields)]
 pub struct Listen {
     /// 使う入力デバイス。名前の一部で選ぶ。空なら OS の既定。
-    pub device: String,
+    ///
+    /// **読むときは `device()` を通すこと。** 空文字が「指定なし」の合図
+    /// なので、生で見るとその意味を各所で書き直すことになる。
+    device: String,
     /// 応答を待つ上限（秒）。
     max_seconds: f32,
     /// 声が途切れてから打ち切るまでの猶予（ミリ秒）。
@@ -254,4 +257,49 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
         eprintln!("  環境変数で上書き: {}", overridden.join(", "));
     }
     Ok(cfg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 検証は**起動時に**効くこと。素材と同じで、遊んでいる最中に気づくのが
+    /// 一番まずい。ここが緩むと、正しい TOML を書いただけで実行時に落ちる。
+    #[test]
+    fn rejects_values_that_would_panic_later() {
+        let bad = |f: fn(&mut Config)| {
+            let mut cfg = Config::default();
+            f(&mut cfg);
+            cfg.validate().unwrap_err().to_string()
+        };
+
+        // Duration::from_secs_f32 がパニックする
+        assert!(bad(|c| c.listen.max_seconds = -1.0).contains("max_seconds"));
+        assert!(bad(|c| c.listen.max_seconds = f32::NAN).contains("max_seconds"));
+        // clamp がパニックする。しかも聞き取りのたび
+        assert!(bad(|c| c.listen.speech_floor = 0.9).contains("speech_ceil"));
+        // 割り算
+        assert!(bad(|c| c.game.insert_every = 0).contains("insert_every"));
+        // フィナーレが空回りする
+        assert!(bad(|c| c.game.flash_ms = 0).contains("flash_ms"));
+        // whisper 側が黙って直していた範囲
+        assert!(bad(|c| c.recognize.audio_ctx = 64).contains("audio_ctx"));
+    }
+
+    #[test]
+    fn accepts_the_shipped_defaults() {
+        Config::default()
+            .validate()
+            .expect("既定値が自分の検証に落ちている");
+    }
+
+    /// 空文字は「指定なし」の合図。生のフィールドを読むとその意味を
+    /// 各所で書き直すことになるので、アクセサに寄せてある。
+    #[test]
+    fn empty_device_means_the_os_default() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.listen.device(), None);
+        cfg.listen.device = "Nuroum".to_string();
+        assert_eq!(cfg.listen.device(), Some("Nuroum"));
+    }
 }

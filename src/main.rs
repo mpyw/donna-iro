@@ -14,7 +14,7 @@ mod app;
 mod config;
 mod io;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use app::{Control, Game, Listener, Screen};
 
@@ -25,19 +25,43 @@ struct Options {
     config: config::Config,
 }
 
-fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let explicit = args
-        .iter()
-        .position(|a| a == "--config")
-        .and_then(|i| args.get(i + 1))
-        .map(std::path::PathBuf::from);
-    let opts = Options {
-        keyboard: args.iter().any(|a| a == "--keyboard"),
-        terminal: args.iter().any(|a| a == "--terminal") || cfg!(not(feature = "window")),
-        once: args.iter().any(|a| a == "--once"),
+/// 引数を順に食べる。**知らないものは黙って捨てない。**
+///
+/// 拾い読みしていた頃は `--termnal` のようなタイポが黙ってウィンドウで
+/// 起動し、`--config` の値が無ければ既定に落ちた。指定したのに効いて
+/// いない、が一番たちが悪い。
+fn parse_args() -> Result<Options> {
+    let mut keyboard = false;
+    let mut terminal = cfg!(not(feature = "window"));
+    let mut once = false;
+    let mut explicit: Option<std::path::PathBuf> = None;
+
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--keyboard" => keyboard = true,
+            "--terminal" => terminal = true,
+            "--once" => once = true,
+            "--config" => {
+                let path = args.next().context("--config にファイル名が無い")?;
+                explicit = Some(std::path::PathBuf::from(path));
+            }
+            other => anyhow::bail!(
+                "知らない引数: {other}\n  使えるのは --keyboard / --terminal / --once / --config <path>"
+            ),
+        }
+    }
+
+    Ok(Options {
+        keyboard,
+        terminal,
+        once,
         config: config::load(explicit.as_deref())?,
-    };
+    })
+}
+
+fn main() -> Result<()> {
+    let opts = parse_args()?;
 
     // 在処を決めて、揃っているかまで見る。遊んでいる最中に落ちないように。
     io::audio::configure(&opts.config)?;
@@ -65,10 +89,16 @@ fn main() -> Result<()> {
         } else {
             Box::new(io::control::Channel(again_rx))
         };
+        // ゲーム側が落ちたことを main へ伝える口。**これが無いと、音源や
+        // デバイスの障害で死んでも終了コードが0になる。** systemd の
+        // 再起動条件や起動スクリプトからは成功に見えてしまう。
+        let (dead_tx, dead_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            if let Err(e) = play(opts, Box::new(io::screen::Remote(tx)), control) {
+            let result = play(opts, Box::new(io::screen::Remote(tx)), control);
+            if let Err(e) = &result {
                 eprintln!("エラー: {e:#}");
             }
+            let _ = dead_tx.send(result.is_err());
             // ここで送信側が落ちるので、ウィンドウ側のループも抜ける。
         });
         // ウィンドウを閉じたらプロセスごと終わる。
@@ -76,7 +106,9 @@ fn main() -> Result<()> {
         if let Err(e) = &closed {
             eprintln!("エラー: {e:#}");
         }
-        quit(if closed.is_ok() { 0 } else { 1 })
+        // ゲーム側が先に落ちていれば、そちらの失敗を優先して報せる。
+        let game_failed = dead_rx.try_recv().unwrap_or(false);
+        quit(if closed.is_ok() && !game_failed { 0 } else { 1 })
     }
     #[cfg(not(feature = "window"))]
     unreachable!("terminal で分岐済み")
@@ -108,12 +140,12 @@ fn quit(code: i32) -> ! {
 
 fn play(opts: Options, screen: Box<dyn Screen>, control: Box<dyn Control>) -> Result<()> {
     let player = Box::new(io::player::Speakers::new()?);
-    let ears = open_ears(&opts)?;
-    Game::new(player, ears, screen, control, &opts.config).run()
+    let listener = open_listener(&opts)?;
+    Game::new(player, listener, screen, control, &opts.config).run()
 }
 
 #[cfg(feature = "whisper")]
-fn open_ears(opts: &Options) -> Result<Box<dyn Listener>> {
+fn open_listener(opts: &Options) -> Result<Box<dyn Listener>> {
     if opts.keyboard {
         return Ok(Box::new(io::listener::Keyboard));
     }
@@ -122,6 +154,6 @@ fn open_ears(opts: &Options) -> Result<Box<dyn Listener>> {
 }
 
 #[cfg(not(feature = "whisper"))]
-fn open_ears(_opts: &Options) -> Result<Box<dyn Listener>> {
+fn open_listener(_opts: &Options) -> Result<Box<dyn Listener>> {
     Ok(Box::new(io::listener::Keyboard))
 }
