@@ -12,7 +12,6 @@
 //! ファイルは触らないので、ここでは純粋として扱う。
 
 pub mod color;
-pub mod config;
 mod control;
 pub mod cue;
 mod game;
@@ -28,5 +27,4 @@ pub use listener::Listener;
 pub use player::Player;
 pub use screen::{Frame, Screen};
 
-pub use config::Config;
 pub use game::Game;

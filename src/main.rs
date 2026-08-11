@@ -11,6 +11,7 @@
 //! 設定は `config.toml` に集約してある。何をいじれるかはそのファイルを見ること。
 
 mod app;
+mod config;
 mod io;
 
 use anyhow::Result;
@@ -21,7 +22,7 @@ struct Options {
     keyboard: bool,
     terminal: bool,
     once: bool,
-    config: app::Config,
+    config: config::Config,
 }
 
 fn main() -> Result<()> {
@@ -35,7 +36,7 @@ fn main() -> Result<()> {
         keyboard: args.iter().any(|a| a == "--keyboard"),
         terminal: args.iter().any(|a| a == "--terminal") || cfg!(not(feature = "window")),
         once: args.iter().any(|a| a == "--once"),
-        config: io::config::load(explicit.as_deref())?,
+        config: config::load(explicit.as_deref())?,
     };
 
     // 遊んでいる最中に落ちないよう、素材は先に確かめる。

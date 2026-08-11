@@ -185,13 +185,24 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 
 ## 構成
 
-**`app` は遊びそのもの、`io` は外の世界に触るもの。** `app` は装置にも
-ファイルにも触らず、何を鳴らすか・何を映すか・聞こえたものをどう解釈するか
-までを決めてトレイトに渡す。実体は `io` にあり、`main` が繋ぐ。
+**3つの層に分けてある。**
+
+| | |
+| --- | --- |
+| `app` | 遊びそのもの。**装置にもファイルにも触らない** |
+| `io` | 外の世界。`app` のトレイトの実装 |
+| `config` | 設定。**どちらからでも読んでよい** |
+
+`app` は何を鳴らすか・何を映すか・聞こえたものをどう解釈するかまでを決めて
+トレイトに渡す。実体は `io` にあり、`main` が繋ぐ。
 
 **`app` から `io` を読んではいけない。** 逆は構わない。この向きが守られて
 いる限り、遊びの側は装置なしで組み立てられる（`app/game.rs` のテストが
 実際にそうしている）。
+
+`config` を第三の層にしてあるのは、遊びの側でも装置の側でも要るため。
+どちらかに寄せると必ずもう一方から手が伸びる。**`load` を呼ぶのは `main`
+だけ**で、`app` が触るのは値と既定値のほう。
 
 ```mermaid
 flowchart TD
@@ -202,7 +213,6 @@ flowchart TD
         matcher["matcher.rs"]
         cue["cue.rs"]
         color["color.rs"]
-        config["config.rs"]
         screen["screen.rs"]
         listener["listener.rs"]
         control["control.rs"]
@@ -215,15 +225,16 @@ flowchart TD
         iocontrol["control/"]
         ioplayer["player/"]
         audio["audio/"]
-        ioconfig["config.rs"]
     end
+
+    config["config.rs"]
 
     main --> game
     main --> ioscreen
     main --> iolistener
     main --> iocontrol
     main --> ioplayer
-    main --> ioconfig
+    main --> config
 
     game --> matcher
     game --> cue
@@ -241,16 +252,19 @@ flowchart TD
     iolistener --> listener
     iocontrol --> control
     ioplayer --> player
-    ioconfig --> config
     iolistener --> audio
     ioplayer --> audio
+
+    game -.-> config
+    audio -.-> config
+    iolistener -.-> config
 
     classDef base fill:#eee,stroke:#999,color:#333;
     class color,config base;
 ```
 
 矢印は `app` の中では下を向き、`io` からは `app` へ向かう。**`app` から
-`io` へ出る矢印は1本も無い。**
+`io` へ出る矢印は1本も無い。** 点線は `config` への依存。
 
 ### app — 遊び
 
@@ -259,7 +273,6 @@ flowchart TD
 | `color.rs` | 色の定義（読み・漢字・RGB・名前）と、子どもの応答 `Answer` |
 | `cue.rs` | 鳴らす素材。文字列ではなく型で指す |
 | `matcher.rs` | 応答の判定 |
-| `config.rs` | 設定の値と既定値。**読み込みは `io`** |
 | `game.rs` | 進行 |
 | `screen.rs` | `Frame` と `Screen`。どこに映すか |
 | `listener.rs` | `Listener`。色をどう受け取るか |
@@ -281,7 +294,6 @@ flowchart TD
 | `audio/assets.rs` | 素材の在処。ファイルか、埋め込みか |
 | `audio/clip.rs` | 復号済みの音。長さと末尾の無音を測る |
 | `audio/ears.rs` | cpal で録る。開きっぱなしにして切り出す |
-| `config.rs` | figment で読む（ファイル・環境変数） |
 
 macOS ではウィンドウをメインスレッドに置く必要があり、`cpal::Stream` も
 `rodio::OutputStream` も `!Send` なので、**ゲーム側をワーカースレッドに出して

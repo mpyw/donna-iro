@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use const_for::const_for;
 
 use crate::app::cue::Cue;
-use crate::app::Config;
+use crate::config::Config;
 
 /// ファイルから読むか、バイナリに埋め込んだものを読むか。
 /// `rodio::Decoder` に渡すため、どちらも同じ型にまとめる。
