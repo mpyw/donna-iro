@@ -209,9 +209,16 @@ fn text_width(s: &str, px: f32) -> i32 {
 /// 重ねても縁がぎざつかない。
 fn text(buf: &mut [u32], cx: i32, cy: i32, px: f32, s: &str, c: Rgb) {
     let f = font();
-    let line = f.horizontal_line_metrics(px).expect("水平メトリクスが無い");
     // ascent は上、descent は下（負）。字面の中心が cy に来るようずらす。
-    let baseline = cy + ((line.ascent + line.descent) / 2.0) as i32;
+    //
+    // **メトリクスが無くても描く。** ここはメインスレッドなので、落ちると
+    // 遊んでいる最中にウィンドウごと消える。字がすこし上下にずれるだけの
+    // ことに、その値打ちは無い。
+    let baseline = cy
+        + match f.horizontal_line_metrics(px) {
+            Some(line) => ((line.ascent + line.descent) / 2.0) as i32,
+            None => (px * 0.3) as i32,
+        };
 
     let mut pen = cx - text_width(s, px) / 2;
     for ch in s.chars() {

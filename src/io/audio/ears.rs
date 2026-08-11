@@ -1,6 +1,6 @@
 //! マイクからの録音。cpal で開きっぱなしにして、呼ばれるたびに切り出す。
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -94,9 +94,9 @@ impl Ears {
         // 物音がひとつ入るだけで倍以上ずれる。
         let mut levels = Vec::with_capacity(FLOOR_CHUNKS);
         for _ in 0..FLOOR_CHUNKS {
-            buf.lock().unwrap().clear();
+            lock(&buf).clear();
             std::thread::sleep(TICK * 2);
-            levels.push(rms(&buf.lock().unwrap()));
+            levels.push(rms(&lock(&buf)));
         }
         levels.sort_by(|a, b| a.total_cmp(b));
         let floor = levels[FLOOR_CHUNKS / 2];
@@ -127,7 +127,7 @@ impl Ears {
     /// 壊れたまま「聞こえなかった」を返し続けると、遊びはランダムな色を
     /// 出し続けて正常に見える。終了コードを直しても再起動の合図が立たない。
     fn check_fault(&self) -> Result<()> {
-        match self.fault.lock().unwrap().as_deref() {
+        match lock(&self.fault).as_deref() {
             Some(e) => anyhow::bail!("マイクの入力ストリームが壊れている: {e}"),
             None => Ok(()),
         }
@@ -159,7 +159,7 @@ impl Ears {
 
         // ストリームは鳴っている間も回り続けているので、直前に流した
         // 歌が溜まっている。窓を開ける前に捨てる。
-        self.buf.lock().unwrap().clear();
+        lock(&self.buf).clear();
 
         let window = (self.rate as usize / 5).max(1);
         let start = Instant::now();
@@ -175,7 +175,7 @@ impl Ears {
         while start.elapsed() < max {
             std::thread::sleep(TICK);
             let level = {
-                let b = self.buf.lock().unwrap();
+                let b = lock(&self.buf);
                 rms(&b[b.len().saturating_sub(window)..])
             };
 
@@ -224,7 +224,7 @@ impl Ears {
         // 完全に消せる競走ではないが、窓は最小になる。
         let out = heard.then(|| {
             // clone してから resample すると二度写す。持っていく。
-            let raw = std::mem::take(&mut *self.buf.lock().unwrap());
+            let raw = std::mem::take(&mut *lock(&self.buf));
             resample(&raw, self.rate, WHISPER_SR)
         });
         self.check_fault()?;
@@ -262,7 +262,7 @@ impl Sink<'_> {
         Ok(device.build_input_stream(
             config,
             move |data: &[T], _: &cpal::InputCallbackInfo| {
-                let mut b = buf.lock().unwrap();
+                let mut b = lock(&buf);
                 for frame in data.chunks(channels) {
                     b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
                 }
@@ -270,11 +270,21 @@ impl Sink<'_> {
             },
             move |e| {
                 eprintln!("入力ストリームのエラー: {e}");
-                broke.lock().unwrap().get_or_insert_with(|| e.to_string());
+                lock(&broke).get_or_insert_with(|| e.to_string());
             },
             None,
         )?)
     }
+}
+
+/// ロックを取る。**毒されていても続ける。**
+///
+/// 音声のコールバックは cpal のスレッドで回る。そこが何かで落ちると
+/// ミューテックスが毒され、以後は `unwrap` するたびにゲーム側まで道連れに
+/// なる。中身は録音した波形と、壊れた事実の控えでしかないので、途中で
+/// 落ちた誰かが居ても、そのまま使って困るものではない。
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 溜まりすぎた先頭を捨てる。**新しいほうを残す。**
