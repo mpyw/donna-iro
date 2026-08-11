@@ -63,29 +63,30 @@ done
 
 printf '%s\n' "--------------------------------------------------------"
 
-# コードが使う crate が Linux（ラズパイ）の依存グラフに居るか。
+# 直接依存が macOS と Linux（ラズパイ）で揃っているか。
 #
 # **figment が macOS 専用の節に紛れていて、ラズパイではビルドできない状態に
 # なっていた。** macOS 上で feature をいくら回しても出ない類の事故なので、
 # 依存グラフのほうから見る。実際にクロスコンパイルはしない（whisper.cpp と
 # ALSA のツールチェーンが要る）ので、これは代用品。
-linux_deps="$(cargo tree --target aarch64-unknown-linux-gnu --prefix none 2>/dev/null |
-  awk '{print $1}' | tr - _ | sort -u)"
-if [ -z "$linux_deps" ]; then
+#
+# **ソースの書き方を見ない。** 以前はここで `use <crate>` を grep していたが、
+# `fontdue` のようにフルパスでしか呼ばない crate は素通りしていた。derive
+# マクロ経由のものも同じ。「片方のターゲットにしか無い直接依存は事故」なら、
+# 依存グラフだけで判定できる。
+#
+# 本当に macOS 専用の crate を足すときは、ここに許容リストが要る。
+target_deps() {
+  cargo tree --depth 1 --prefix none --target "$1" 2>/dev/null | awk '{print $1}' | sort -u
+}
+mac_deps="$(target_deps aarch64-apple-darwin)"
+linux_deps="$(target_deps aarch64-unknown-linux-gnu)"
+if [ -z "$mac_deps" ] || [ -z "$linux_deps" ]; then
   printf '%-22s %s\n' "Linux の依存" "調べられなかった（cargo tree が失敗）"
 else
-  missing=""
-  # crate 内のモジュール（main.rs が宣言しているもの）は外部 crate ではない。
-  local_mods="$(grep -oE '^mod [a-z_]+' src/main.rs | awk '{print $2}')"
-  used="$(grep -rhoE '^[[:space:]]*use [a-z][a-z0-9_]*' src --include='*.rs' |
-    awk '{print $2}' | tr - _ | sort -u)"
-  for c in $used; do
-    case "$c" in std|core|alloc|crate|self|super) continue ;; esac
-    printf '%s\n' "$local_mods" | grep -qx "$c" && continue
-    printf '%s\n' "$linux_deps" | grep -qx "$c" || missing="$missing $c"
-  done
-  if [ -n "$missing" ]; then
-    printf '%-22s %s\n' "Linux の依存" "NG:$missing が Linux 側に無い"
+  only_mac="$(comm -23 <(printf '%s\n' "$mac_deps") <(printf '%s\n' "$linux_deps") | tr '\n' ' ')"
+  if [ -n "${only_mac// /}" ]; then
+    printf '%-22s %s\n' "Linux の依存" "NG: $only_mac が macOS にしか無い"
     echo "  Cargo.toml の [target.'cfg(target_os = \"macos\")'.dependencies] に" >&2
     echo "  紛れていないか見ること。" >&2
     fail=1

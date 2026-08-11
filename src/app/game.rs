@@ -288,6 +288,40 @@ mod tests {
         );
     }
 
+    /// 入力そのものが閉じたら、そこで畳む。
+    ///
+    /// **`--keyboard` をパイプで流し込むと EOF がここに来る。** 「無言」と
+    /// 同じ扱いにしていた頃は、ランダムな色を上限まで鳴らし続けて返らなかった。
+    /// フィナーレも「もう1回」も通らずに終わるのが正しい。
+    #[test]
+    fn closed_input_ends_the_game_without_a_finale() {
+        struct Eof;
+        impl Listener for Eof {
+            fn hear(&mut self, _max: Duration) -> Result<Heard> {
+                Ok(Heard::Closed)
+            }
+        }
+        let tape = Tape::default();
+        Game::new(
+            Box::new(tape.clone()),
+            Box::new(Eof),
+            Box::new(Blind),
+            // 何度でも応える。**閉じた側が勝たないと返ってこない。**
+            Box::new(Again(usize::MAX)),
+            &Config::default(),
+        )
+        .run()
+        .unwrap();
+
+        let cues = tape.0.borrow().clone();
+        assert_eq!(
+            cues,
+            [Cue::Intro, Cue::Question],
+            "余計に鳴っている: {cues:?}"
+        );
+        assert!(!cues.contains(&Cue::Finale), "閉じたのにフィナーレが鳴った");
+    }
+
     #[test]
     fn unheard_answer_still_plays_some_color() {
         let cues = played(vec![None], 0);

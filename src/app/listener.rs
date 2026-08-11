@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-/// 応答を1回聞き取る。何も言わなければ `None`。
 /// 聞き取りの結果。
 ///
 /// **「言わなかった」と「入力が絶えた」を分ける。** どちらも `None` に
@@ -26,6 +25,7 @@ pub enum Heard {
     Closed,
 }
 
+/// 応答を1回聞き取る。`max` は待つ上限で、声が途切れたら早く返してよい。
 pub trait Listener {
     fn hear(&mut self, max: Duration) -> Result<Heard>;
 }

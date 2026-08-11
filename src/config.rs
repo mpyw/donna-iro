@@ -173,27 +173,66 @@ impl Config {
     /// `speech_floor > speech_ceil` なら `clamp` が、聞き取りのたびに
     /// パニックする。`insert_every = 0` は割り算、`flash_ms = 0` は
     /// フィナーレのビジーループになる。
+    ///
+    /// **「正かつ有限」では足りない。** `max_seconds = 1e30` はそれを通るが
+    /// `Duration::from_secs_f32` は変換できずに落ちる。上限まで見る。
     fn validate(&self) -> Result<()> {
-        let positive = |name: &str, v: f32| -> Result<()> {
-            if v.is_finite() && v > 0.0 {
+        // 範囲で見る。閉区間。
+        let between = |name: &str, v: f32, lo: f32, hi: f32| -> Result<()> {
+            if v.is_finite() && (lo..=hi).contains(&v) {
                 Ok(())
             } else {
-                anyhow::bail!("{name} は正の有限な数であること（いまは {v}）")
-            }
-        };
-        let not_negative = |name: &str, v: f32| -> Result<()> {
-            if v.is_finite() && v >= 0.0 {
-                Ok(())
-            } else {
-                anyhow::bail!("{name} は0以上の有限な数であること（いまは {v}）")
+                anyhow::bail!("{name} は {lo} 〜 {hi} であること（いまは {v}）")
             }
         };
 
-        positive("listen.max_seconds", self.listen.max_seconds)?;
-        positive("listen.speech_ratio", self.listen.speech_ratio)?;
-        not_negative("listen.speech_floor", self.listen.speech_floor)?;
-        not_negative("listen.speech_ceil", self.listen.speech_ceil)?;
-        not_negative("listen.threshold", self.listen.threshold)?;
+        // 上限は「これを超えたら設定を間違えている」の線。
+        //
+        // 1分待つ玩具は使い物にならないし、`Duration` に載らない値や、
+        // 録音バッファの上限計算（`rate * (max + 2)`）が桁溢れする値も
+        // ここで落ちる。
+        const MAX_WAIT: f32 = 60.0;
+        // 振幅は ±1 に正規化してある。1を超えるしきい値は永久に発火しない。
+        const MAX_LEVEL: f32 = 1.0;
+
+        between(
+            "listen.max_seconds",
+            self.listen.max_seconds,
+            0.01,
+            MAX_WAIT,
+        )?;
+        between("listen.speech_ratio", self.listen.speech_ratio, 0.01, 100.0)?;
+        between(
+            "listen.speech_floor",
+            self.listen.speech_floor,
+            0.0,
+            MAX_LEVEL,
+        )?;
+        between(
+            "listen.speech_ceil",
+            self.listen.speech_ceil,
+            0.0,
+            MAX_LEVEL,
+        )?;
+        between("listen.threshold", self.listen.threshold, 0.0, MAX_LEVEL)?;
+
+        // **窓に収まらない下拵えは、永久に無言と同じ。** 残響を無視する時間と
+        // 発話が続くべき時間の合計が上限を超えると、`listen` は毎回
+        // 「聞こえなかった」で返る。落ちも警告も出ないぶん、こちらのほうが
+        // 見つけにくい。
+        // 検証器自身が落ちては元も子もない。デバッグビルドの `+` は溢れる。
+        let head = self
+            .listen
+            .guard_ms
+            .saturating_add(self.listen.min_speech_ms);
+        let window_ms = (self.listen.max_seconds * 1000.0) as u64;
+        if head >= window_ms {
+            anyhow::bail!(
+                "listen.guard_ms + min_speech_ms（{head}ms）が max_seconds（{window_ms}ms）に\
+                 収まっていない。このままだと何を言っても無言になる"
+            );
+        }
+
         if self.listen.speech_floor > self.listen.speech_ceil {
             anyhow::bail!(
                 "listen.speech_floor は speech_ceil 以下であること（いまは {} > {}）",
@@ -276,6 +315,15 @@ mod tests {
         // Duration::from_secs_f32 がパニックする
         assert!(bad(|c| c.listen.max_seconds = -1.0).contains("max_seconds"));
         assert!(bad(|c| c.listen.max_seconds = f32::NAN).contains("max_seconds"));
+        // **上限側でもパニックする。** 「正かつ有限」だけ見ていた頃はここが
+        // 素通りして、Duration に変換できずに落ちていた。
+        assert!(bad(|c| c.listen.max_seconds = 1.0e30).contains("max_seconds"));
+        assert!(bad(|c| c.listen.max_seconds = f32::INFINITY).contains("max_seconds"));
+        // 振幅は ±1 まで。それを超えるしきい値は永久に発火しない
+        assert!(bad(|c| c.listen.threshold = 2.0).contains("threshold"));
+        // 下拵えが窓に収まらない = 何を言っても無言
+        assert!(bad(|c| c.listen.guard_ms = 9_000).contains("収まっていない"));
+        assert!(bad(|c| c.listen.min_speech_ms = 9_000).contains("収まっていない"));
         // clamp がパニックする。しかも聞き取りのたび
         assert!(bad(|c| c.listen.speech_floor = 0.9).contains("speech_ceil"));
         // 割り算

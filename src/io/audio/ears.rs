@@ -29,6 +29,13 @@ pub struct Ears {
     /// 環境ノイズの推定値。毎回の観測で更新する。
     floor: f32,
     cfg: Listen,
+    /// 入力ストリームが壊れた事実。一度立ったら下げない。
+    ///
+    /// **ログに出すだけでは足りない。** マイクを抜かれてもストリームは
+    /// 黙って無音を流し続けるので、`listen` は毎回「無言」で返り、遊びは
+    /// 永久にランダムな色を出し続ける。壊れているのに動いているように
+    /// 見えるので、終了コードを直しても再起動の合図が立たない。
+    fault: Arc<Mutex<Option<String>>>,
 }
 
 impl Ears {
@@ -56,13 +63,20 @@ impl Ears {
         //
         // listen() は頭で捨ててから聞くので、待ちの間のぶんは要らない。
         let cap = (rate as f32 * (cfg.listen.max().as_secs_f32() + 2.0)) as usize;
-        let err = |e| eprintln!("入力ストリームのエラー: {e}");
+
+        let fault = Arc::new(Mutex::new(None::<String>));
 
         // チャンネルを混ぜてモノラルにしながら溜める。
         macro_rules! sink {
             ($t:ty, $conv:expr) => {{
                 let buf = Arc::clone(&buf);
                 let conv: fn($t) -> f32 = $conv;
+                // 壊れたら残す。読むのは listen() の頭。
+                let broke = Arc::clone(&fault);
+                let err = move |e: cpal::StreamError| {
+                    eprintln!("入力ストリームのエラー: {e}");
+                    broke.lock().unwrap().get_or_insert_with(|| e.to_string());
+                };
                 device.build_input_stream(
                     &config,
                     move |data: &[$t], _: &cpal::InputCallbackInfo| {
@@ -70,12 +84,7 @@ impl Ears {
                         for frame in data.chunks(channels) {
                             b.push(frame.iter().map(|&s| conv(s)).sum::<f32>() / channels as f32);
                         }
-                        // 上限の倍まで伸ばしてからまとめて捨てる。毎回
-                        // 先頭を削ると、そのたびに全体をずらすことになる。
-                        if b.len() > cap * 2 {
-                            let drop = b.len() - cap;
-                            b.drain(..drop);
-                        }
+                        trim(&mut b, cap);
                     },
                     err,
                     None,
@@ -110,6 +119,7 @@ impl Ears {
             rate,
             floor,
             cfg: cfg.listen.clone(),
+            fault,
         };
         eprintln!("  環境ノイズ {floor:.4} → しきい値 {:.4}", ears.threshold());
         Ok(ears)
@@ -144,6 +154,12 @@ impl Ears {
     ///
     /// 何も聞こえなければ `None`。呼び出し側でランダムな色に倒す。
     pub fn listen(&mut self, max: Duration) -> Result<Option<Vec<f32>>> {
+        // **無言と故障は別のこと。** 装置が壊れたまま「聞こえなかった」を
+        // 返し続けると、遊びはランダムな色を出し続けて正常に見える。
+        if let Some(e) = self.fault.lock().unwrap().clone() {
+            anyhow::bail!("マイクの入力ストリームが壊れている: {e}");
+        }
+
         // ストリームは鳴っている間も回り続けているので、直前に流した
         // 歌が溜まっている。窓を開ける前に捨てる。
         self.buf.lock().unwrap().clear();
@@ -209,6 +225,17 @@ impl Ears {
         // clone してから resample すると二度写す。持っていく。
         let raw = std::mem::take(&mut *self.buf.lock().unwrap());
         Ok(Some(resample(&raw, self.rate, WHISPER_SR)))
+    }
+}
+
+/// 溜まりすぎた先頭を捨てる。**新しいほうを残す。**
+///
+/// 上限の倍まで伸ばしてからまとめて捨てる。毎回きっちり `cap` に収めると、
+/// そのたびに残り全体をずらすことになる。
+fn trim(buf: &mut Vec<f32>, cap: usize) {
+    if buf.len() > cap * 2 {
+        let drop = buf.len() - cap;
+        buf.drain(..drop);
     }
 }
 
@@ -286,6 +313,28 @@ mod tests {
         // ピークで見ていた頃はここでノイズに引っ張られていた。
         let spike = rms(&[0.0, 0.0, 0.0, 1.0]);
         assert!(spike < 0.51, "単発のノイズに引っ張られている: {spike}");
+    }
+
+    /// **上限が無かった頃は朝まで待つと数百MBになった。** ストリームは
+    /// 開きっぱなしなので、「もう1回」を待っている間も溜まり続ける。
+    #[test]
+    fn the_buffer_stays_bounded_while_nobody_is_listening() {
+        const CAP: usize = 100;
+        let mut buf = Vec::new();
+        // コールバックが刻んで積むのを真似る。
+        for round in 0..1_000 {
+            buf.extend((0..7).map(|i| (round * 7 + i) as f32));
+            trim(&mut buf, CAP);
+            assert!(buf.len() <= CAP * 2, "上限を超えた: {}", buf.len());
+        }
+        // 捨てるのは古いほう。最後に積んだ値が残っていること。
+        assert_eq!(*buf.last().unwrap(), 6_999.0);
+
+        // 一度に大量に来ても収まる。
+        let mut burst: Vec<f32> = (0..10_000).map(|i| i as f32).collect();
+        trim(&mut burst, CAP);
+        assert_eq!(burst.len(), CAP);
+        assert_eq!(burst[0], 9_900.0);
     }
 
     #[test]

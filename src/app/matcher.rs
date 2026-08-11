@@ -30,6 +30,17 @@ use const_for::const_for;
 /// きいろの読み「いーろ」に化けることがある。長いものから順に削る。
 const PROMPT: &[&str] = &["どんないろがすき", "どんないろ", "どんな"];
 
+/// 質問文そのもの。**区間まるごとがこの一部なら、答えではなく回り込み。**
+///
+/// `PROMPT` を削るだけでは足りない。whisper が「どんな いろ」と空白で
+/// 割って返すと、区切ってから削るので破片の「いろ」が生き残り、音の
+/// 近さで「しろ」に当たる。**しかも位置を最優先するので、後ろに続く
+/// 本当の答えを差し置いて毎回それが鳴る。**
+///
+/// 色の読みはどれもこの文の一部ではないので、丸ごと一致で捨ててよい。
+/// 破れていないことは `no_answer_hides_inside_the_question` で見る。
+const QUESTION: &str = "どんないろがすき";
+
 /// 拗音と長音を落とした骨格。編集距離を測るときだけ使う。
 ///
 /// 幼児の発音は「ぜ」が「じぇ」に、「ぶ」が「ば」に寄る。小書き文字と
@@ -157,11 +168,27 @@ impl Matcher {
     }
 
     pub fn find(&self, raw: &str) -> Option<Answer> {
-        let mut parts: Vec<String> = segments(&normalize(raw))
-            .into_iter()
-            .map(|seg| strip_prompt(&seg))
-            .filter(|seg| !seg.is_empty())
-            .collect();
+        let mut parts: Vec<String> = Vec::new();
+        for seg in segments(&normalize(raw)) {
+            let seg = strip_prompt(&seg);
+            if seg.is_empty() {
+                continue;
+            }
+            if QUESTION.contains(seg.as_str()) {
+                // 質問文の破片。**単独では答えにならない。** ただし認識が
+                // 語を割っただけということもある（「ちゃいろ」→「じゃあ、
+                // いろ」）ので、直前に実のある区間があればそちらへ繋ぐ。
+                // 無ければ捨てる。
+                //
+                // **捨てるのは `truncate` の前でなければならない。** 破片が
+                // 席を占めると、後ろの本当の答えが `head` から押し出される。
+                if let Some(prev) = parts.last_mut() {
+                    prev.push_str(&seg);
+                }
+                continue;
+            }
+            parts.push(seg);
+        }
         // 同じ語の繰り返しは畳む。tiny が出力を繰り返すことがある。
         parts.dedup();
         parts.truncate(self.head);
@@ -620,6 +647,31 @@ mod tests {
         assert_eq!(find("どんないろがすき"), None);
         // 質問の後ろに答えがくっついても答えだけ拾う。
         assert_eq!(find("どんないろがすきあか"), c(Color::Red));
+
+        // **whisper は質問を空白で割って返す。** 区切ってから削るので、
+        // 破片の「いろ」が生き残って「しろ」に化けていた。
+        assert_eq!(find("どんな いろ"), None);
+        assert_eq!(find("いろ"), None);
+        assert_eq!(find("どんな いろ が すき"), None);
+        // **そして位置を最優先するので、破片が本当の答えを押し出す。**
+        // ランダムに外すのではなく、毎回きまって「しろ」が鳴っていた。
+        assert_eq!(find("どんな いろ あか"), c(Color::Red));
+        assert_eq!(find("どんな いろ が すき みどり"), c(Color::Green));
+    }
+
+    /// 質問文の破片を捨てる仕掛けが、答えのほうを巻き込んでいないこと。
+    ///
+    /// 色を足したときに「読みがたまたま質問文の一部だった」となると、
+    /// その色だけ永久に当たらなくなる。無言に倒れるので気づきにくい。
+    #[test]
+    fn no_answer_hides_inside_the_question() {
+        for (answer, reading) in CANDIDATES {
+            assert!(
+                !QUESTION.contains(reading),
+                "{answer:?} の読み「{reading}」が質問文の一部になっている。\
+                 このままだと聞き取れても捨てられる"
+            );
+        }
     }
 
     #[test]
