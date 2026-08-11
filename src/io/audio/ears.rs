@@ -71,7 +71,7 @@ impl Ears {
             ($t:ty, $conv:expr) => {{
                 let buf = Arc::clone(&buf);
                 let conv: fn($t) -> f32 = $conv;
-                // 壊れたら残す。読むのは listen() の頭。
+                // 壊れたら残す。読むのは listen() の入口と出口。
                 let broke = Arc::clone(&fault);
                 let err = move |e: cpal::StreamError| {
                     eprintln!("入力ストリームのエラー: {e}");
@@ -132,6 +132,17 @@ impl Ears {
         (self.floor * self.cfg.speech_ratio).clamp(self.cfg.speech_floor, self.cfg.speech_ceil)
     }
 
+    /// 入力ストリームが壊れていないか。**無言と故障は別のこと。**
+    ///
+    /// 壊れたまま「聞こえなかった」を返し続けると、遊びはランダムな色を
+    /// 出し続けて正常に見える。終了コードを直しても再起動の合図が立たない。
+    fn check_fault(&self) -> Result<()> {
+        match self.fault.lock().unwrap().as_deref() {
+            Some(e) => anyhow::bail!("マイクの入力ストリームが壊れている: {e}"),
+            None => Ok(()),
+        }
+    }
+
     /// 環境ノイズの推定を観測で更新する。
     ///
     /// 起動時の一発勝負にすると、その瞬間たまたま騒がしかっただけで
@@ -154,11 +165,7 @@ impl Ears {
     ///
     /// 何も聞こえなければ `None`。呼び出し側でランダムな色に倒す。
     pub fn listen(&mut self, max: Duration) -> Result<Option<Vec<f32>>> {
-        // **無言と故障は別のこと。** 装置が壊れたまま「聞こえなかった」を
-        // 返し続けると、遊びはランダムな色を出し続けて正常に見える。
-        if let Some(e) = self.fault.lock().unwrap().clone() {
-            anyhow::bail!("マイクの入力ストリームが壊れている: {e}");
-        }
+        self.check_fault()?;
 
         // ストリームは鳴っている間も回り続けているので、直前に流した
         // 歌が溜まっている。窓を開ける前に捨てる。
@@ -219,6 +226,11 @@ impl Ears {
             threshold,
             self.threshold()
         );
+        // **入口だけでは足りない。** 窓を開けている最中に抜かれると、
+        // この回は「無言」で返ってランダムな色が1つ鳴り、故障に気づくのが
+        // 次の聞き取りまで遅れる。返す直前にもう一度見る。
+        self.check_fault()?;
+
         if !heard {
             return Ok(None);
         }

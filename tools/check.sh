@@ -75,9 +75,14 @@ printf '%s\n' "--------------------------------------------------------"
 # マクロ経由のものも同じ。「片方のターゲットにしか無い直接依存は事故」なら、
 # 依存グラフだけで判定できる。
 #
+# **--all-features で見る。** 既定の feature だけだと、任意 feature からしか
+# 有効にならない依存が両方の一覧から消えて、macOS 専用節に置いても
+# 「そろっている」と報告される。
+#
 # 本当に macOS 専用の crate を足すときは、ここに許容リストが要る。
 target_deps() {
-  cargo tree --depth 1 --prefix none --target "$1" 2>/dev/null | awk '{print $1}' | sort -u
+  cargo tree --all-features --depth 1 --prefix none --target "$1" 2>/dev/null |
+    awk '{print $1}' | sort -u
 }
 mac_deps="$(target_deps aarch64-apple-darwin)"
 linux_deps="$(target_deps aarch64-unknown-linux-gnu)"

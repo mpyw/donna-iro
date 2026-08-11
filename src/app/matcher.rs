@@ -169,25 +169,41 @@ impl Matcher {
 
     pub fn find(&self, raw: &str) -> Option<Answer> {
         let mut parts: Vec<String> = Vec::new();
+        // 直前の区間へ繋いでよいか。**質問が挟まった時点で切れる。**
+        let mut joinable = false;
+
         for seg in segments(&normalize(raw)) {
+            if seg.is_empty() {
+                // 区切りが続いただけ。何も起きていない。
+                continue;
+            }
             let seg = strip_prompt(&seg);
             if seg.is_empty() {
+                // まるごと質問だった。**ここから後ろの破片は、前の語の
+                // 続きではなく質問の続き。** 繋ぎ先を切る。
+                joinable = false;
                 continue;
             }
             if QUESTION.contains(seg.as_str()) {
                 // 質問文の破片。**単独では答えにならない。** ただし認識が
                 // 語を割っただけということもある（「ちゃいろ」→「じゃあ、
-                // いろ」）ので、直前に実のある区間があればそちらへ繋ぐ。
-                // 無ければ捨てる。
+                // いろ」）ので、直前が実のある区間ならそちらへ繋ぐ。
+                //
+                // 繋ぎ先が切れていれば捨てる。切らずにいると
+                // 「じゃあ どんな いろ あか」の「いろ」が「じゃあ」に
+                // 付いて「ちゃいろ」になり、また「あか」を押し出す。
                 //
                 // **捨てるのは `truncate` の前でなければならない。** 破片が
                 // 席を占めると、後ろの本当の答えが `head` から押し出される。
-                if let Some(prev) = parts.last_mut() {
-                    prev.push_str(&seg);
+                if joinable {
+                    if let Some(prev) = parts.last_mut() {
+                        prev.push_str(&seg);
+                    }
                 }
                 continue;
             }
             parts.push(seg);
+            joinable = true;
         }
         // 同じ語の繰り返しは畳む。tiny が出力を繰り返すことがある。
         parts.dedup();
@@ -234,7 +250,11 @@ impl Matcher {
         }
 
         let chars = skeleton(text);
-        if chars.is_empty() {
+        // **1音では土俵に乗らない。** どの読みも骨格で2文字以上あるので、
+        // 1文字が当たったとしてもそれは「近い」のではなく「短すぎて何にでも
+        // 近い」。「えー」が「あお」に化けて、位置優先で後ろの本当の答えを
+        // 押し出していた。
+        if chars.len() < 2 {
             return None;
         }
         let mut scores: Vec<(Answer, usize)> = Vec::new();
@@ -657,6 +677,29 @@ mod tests {
         // ランダムに外すのではなく、毎回きまって「しろ」が鳴っていた。
         assert_eq!(find("どんな いろ あか"), c(Color::Red));
         assert_eq!(find("どんな いろ が すき みどり"), c(Color::Green));
+
+        // **前に何か挟まっても同じこと。** 破片を直前へ繋ぐようにしたら、
+        // 今度は繋ぎ先がフィラーになって「ちゃいろ」「きみどり」に化けた。
+        // 質問が挟まった時点で繋ぎ先を切る。
+        assert_eq!(find("じゃあ どんな いろ あか"), c(Color::Red));
+        assert_eq!(find("じゃあ どんな いろ が すき みどり"), c(Color::Green));
+        assert_eq!(find("えー どんな いろ が すき みどり"), c(Color::Green));
+    }
+
+    /// 1音のフィラーは色にしない。
+    ///
+    /// **短すぎるものは何にでも近い。** 「えー」の骨格は「え」1文字で、
+    /// 「あお」に一意に当たっていた。位置が最優先なので、後ろで本当に
+    /// 言った色を押し出す。ランダムに外すのではなく毎回きまって外す。
+    #[test]
+    fn a_single_mora_is_not_a_color() {
+        assert_eq!(find("えー"), None);
+        assert_eq!(find("えー みどり"), c(Color::Green));
+        assert_eq!(find("うーん あか"), c(Color::Red));
+        // 下限の根拠。候補の骨格はどれも2文字以上ある。
+        for (a, sk) in Matcher::new(2).skeletons.iter() {
+            assert!(sk.len() >= 2, "{a:?} の骨格が2文字未満: {sk:?}");
+        }
     }
 
     /// 質問文の破片を捨てる仕掛けが、答えのほうを巻き込んでいないこと。

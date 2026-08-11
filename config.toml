@@ -35,6 +35,8 @@ model = ""
 device = "Nuroum"
 
 # 応答を待つ上限（秒）。2歳児は考えてから言うので短すぎると取りこぼす。
+# 0.01〜60 の範囲。guard_ms + min_speech_ms がこの窓に収まらないと、
+# 何を言っても無言になるので起動時に弾く。
 #   DONNA_IRO_LISTEN__MAX_SECONDS
 max_seconds = 5.0
 
@@ -58,6 +60,7 @@ min_speech_ms = 75
 # 拾いすぎのコストはほぼゼロ（誤検出してもランダムな色が鳴るだけで、
 # 何も聞こえなかった場合と結果が同じ）。逆に取りこぼすと子どもが
 # 答えたのに無視される。迷ったら緩める側に倒すこと。
+# 振幅は ±1 に正規化してあるので floor / ceil / threshold の上限は 1。
 #   DONNA_IRO_LISTEN__SPEECH_RATIO / __SPEECH_FLOOR / __SPEECH_CEIL
 speech_ratio = 2.0
 speech_floor = 0.005

@@ -13,7 +13,7 @@ use crate::app::Control;
 pub struct Channel(pub std::sync::mpsc::Receiver<()>);
 
 impl Control for Channel {
-    fn wait(&mut self) -> bool {
+    fn wait_for_again(&mut self) -> bool {
         // 遊んでいる最中に押されたぶんは捨てる。子どもは歌っている間も
         // キーを叩くので、溜めたまま待ちに入るとフィナーレが鳴り終わった
         // 瞬間に再開してしまう。
@@ -31,7 +31,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         let mut c = Channel(rx);
         drop(tx); // ウィンドウが閉じられた
-        assert!(!c.wait(), "送り手が居なくなったら終わり");
+        assert!(!c.wait_for_again(), "送り手が居なくなったら終わり");
     }
 
     #[test]
@@ -44,7 +44,7 @@ mod tests {
             tx.send(()).unwrap();
         }
         drop(tx);
-        assert!(!c.wait(), "溜まっていたぶんで再開してはいけない");
+        assert!(!c.wait_for_again(), "溜まっていたぶんで再開してはいけない");
     }
 
     #[test]
@@ -63,6 +63,6 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(25));
             }
         });
-        assert!(c.wait(), "待っている間に押されたら続ける");
+        assert!(c.wait_for_again(), "待っている間に押されたら続ける");
     }
 }

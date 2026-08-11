@@ -81,7 +81,7 @@ impl Game {
             // 待っていることを画面に出してから待つ。黙って止まっていると、
             // 終わったのか固まったのか区別がつかない。
             self.screen.show(Frame::Again);
-            if !self.control.wait() {
+            if !self.control.wait_for_again() {
                 return Ok(());
             }
         }
@@ -249,7 +249,7 @@ mod tests {
     /// `n` 回だけ「もう1回」に応える。
     struct Again(usize);
     impl Control for Again {
-        fn wait(&mut self) -> bool {
+        fn wait_for_again(&mut self) -> bool {
             let more = self.0 > 0;
             self.0 = self.0.saturating_sub(1);
             more
