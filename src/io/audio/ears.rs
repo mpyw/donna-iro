@@ -285,34 +285,44 @@ fn resample(src: &[f32], from: u32, to: u32) -> Vec<f32> {
 
 /// 使う入力デバイスを決める。
 ///
-/// **見つからなければ既定に落とさず、そこで止める。** 黙って内蔵マイクに
-/// 落ちるのが一番たちが悪い。名前を指定したのに違うマイクで動いていて、
-/// 精度が出ない理由が分からなくなる。
+/// **見つからなくても止めない。** テレビに繋ぎっぱなしの玩具なので、起動
+/// しないほうが困る。会議アプリがデバイスを掴んでいたり、USB を挿し直して
+/// 名前が変わったりで、指定が外れることは普通に起きる。
+///
+/// ただし**黙って落ちない。** 名前を指定したのに違うマイクで動いていて
+/// 精度が出ない、というのが一番たちが悪い。見えているものを並べて出す。
 fn input_device(cfg: &Listen) -> Result<cpal::Device> {
-    let host = cpal::default_host();
-    let Some(want) = cfg.device() else {
-        return host.default_input_device().context("入力デバイスがない");
+    let default = || {
+        cpal::default_host()
+            .default_input_device()
+            .context("入力デバイスがない")
     };
+    let Some(want) = cfg.device() else {
+        return default();
+    };
+    let host = cpal::default_host();
     let found = host
         .input_devices()?
         .find(|d| d.name().is_ok_and(|name| name.contains(want)));
-    match found {
-        Some(device) => Ok(device),
-        None => {
-            let names: Vec<String> = host
-                .input_devices()?
-                .filter_map(|d| d.name().ok())
-                .collect();
-            anyhow::bail!(
-                "入力デバイスが見つからない: {want}\n  見えているもの: {}",
-                if names.is_empty() {
-                    "（無し）".to_string()
-                } else {
-                    names.join(" / ")
-                }
-            )
-        }
+    if let Some(device) = found {
+        return Ok(device);
     }
+
+    let names: Vec<String> = host
+        .input_devices()?
+        .filter_map(|d| d.name().ok())
+        .collect();
+    eprintln!("  ⚠ 指定した入力デバイスが見つからない: {want}");
+    eprintln!(
+        "    見えているもの: {}",
+        if names.is_empty() {
+            "（無し）".to_string()
+        } else {
+            names.join(" / ")
+        }
+    );
+    eprintln!("    OS の既定で続ける。精度が出ないときはこの行を疑うこと。");
+    default()
 }
 
 #[cfg(test)]

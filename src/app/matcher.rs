@@ -224,8 +224,11 @@ impl Matcher {
                 // ここで結合の**部分一致**に譲らないのが要点。譲ると
                 // 「みじろ、きいろ」が きいろ になり、幻覚の継ぎ足しを
                 // 捨てる仕掛けが壊れる。
+                // **同点で「ぜんぶ」を勝たせない。** 単独が All で結合が色
+                // なら、同じ距離でも結合の色を採る。
                 Some((sa, sd)) => Some(match joined.and_then(|j| self.nearest(j)) {
                     Some((ja, jd)) if jd < sd => ja,
+                    Some((ja, jd)) if jd == sd && sa == Answer::All && ja != Answer::All => ja,
                     _ => sa,
                 }),
                 // 乗っていない。**部分一致のほうが音の近さより確か。**
@@ -340,19 +343,13 @@ impl Matcher {
             if d > allowed(*a, len) {
                 continue;
             }
-            // **「ぜんぶ」は末尾の「ぶ」で決まる。**
-            //
-            // 頭は崩れる（「ぜ」が「じぇ」「じゃ」になるのは実際に見た）。
-            // だが末尾が別の子音になったものは、たいてい**別の語が崩れて
-            // 寄ってきたもの**。
-            //
-            // ```text
-            // ぴんく → ぜんく   ぜんぶ から d=2。正当な ぜんば と同じ近さ
-            // ```
-            //
-            // 距離では分けられない。誤爆すると遊びがそこで終わるので、
-            // ここだけは位置を見る。
-            if matches!(a, Answer::All) && !ends_like_all(&chars, r) {
+            let truncated = r.starts_with(chars.as_slice());
+            let len = if truncated {
+                r.len()
+            } else {
+                r.len().min(chars.len())
+            };
+            if d > allowed(*a, len) {
                 continue;
             }
             scores.push((*a, d));
@@ -360,6 +357,17 @@ impl Matcher {
         scores.sort_by_key(|&(_, d)| d);
 
         let (best, best_d) = *scores.first()?;
+        // **「ぜんぶ」は五分の勝負を勝ってはいけない。** 誤爆は取り返しが
+        // つかないが、取りこぼしは次の周回で拾える。同じ距離に色が居るなら
+        // 色を採る。
+        if best == Answer::All {
+            if let Some(&(color, _)) = scores
+                .iter()
+                .find(|&&(a, d)| d == best_d && a != Answer::All)
+            {
+                return Some((color, best_d));
+            }
+        }
         // 同点なら諦める。「あか」と「あお」、「しろ」と「くろ」のように
         // 1文字違いの色があるので、割れたまま採用すると取り違える。
         if scores.get(1).is_some_and(|&(_, d)| d == best_d) {
@@ -568,29 +576,6 @@ fn spanning(text: &str, boundary: usize) -> Option<Answer> {
             })
         })
         .map(|(a, _)| *a)
-}
-
-/// 「ぜんぶ」の末尾として通してよい音。**唇で作る音まで。**
-///
-/// 「ぶ」は唇を閉じて出す。同じ作り方の は・ば・ぱ行と ま行なら、崩れても
-/// そこに残る。「く」「つ」のように舌で作る音になったものは、たいてい
-/// 別の語が崩れて寄ってきたもの。
-///
-/// 子音の一般の距離では分けられなかった。「く」と「ぶ」も「ば」と「ぶ」も
-/// 同じ2になる（片方は子音違い、もう片方は母音違い）。
-const ALL_TAIL: &[u8] = b"hbpm";
-
-/// 「ぜんぶ」の末尾として通してよい音か。
-///
-/// 言い切り（「ぜん」）は末尾が欠けているだけなので通す。
-fn ends_like_all(input: &[char], reading: &[char]) -> bool {
-    if reading.starts_with(input) {
-        return true;
-    }
-    match input.last().copied().and_then(decompose) {
-        Some((c, _)) => ALL_TAIL.contains(&c),
-        None => false,
-    }
 }
 
 /// 末尾が読みそのものになっているか。長い読みから順に見る。
@@ -972,6 +957,17 @@ mod tests {
             "えー ぜんぶ",  // フィラー
             "ぜんぶぜんぶ", // 繰り返す
             "ぜんぶが すき",
+            // **語を含んでいれば拾えること。** 言い方を増やさない方針なので、
+            // 「ぜんぶ」が入った言い方はどれも通らないと困る。
+            "ゼンブ", // カタカナ
+            "全部",   // 漢字
+            "全部の色",
+            "ぜんぶ！",
+            "ぜんぶのいろ",
+            "ぜんぶがいい",
+            "もうぜんぶ",
+            "ぜんぶすき",
+            "どんないろがすき ぜんぶ", // 質問の回り込み付き
         ];
         let mut lost: Vec<&str> = Vec::new();
         for f in FORMS {
@@ -1340,14 +1336,14 @@ mod tests {
                 "語尾が付くと、貼らない判定を素通りしていた",
             ),
             ("みどりだよ き いろ", "みどり", "同上"),
-            // ぜんぶ の誤爆
+            // 「ぜんぶ」も特別扱いしない。ぴんく の崩れが ぜんぶ になるのは、
+            // 別の色になるのと同じ扱い（「もう1回」で戻せる）。
             (
                 "ぜんく",
-                "ぴんく",
-                "ぜんぶ から d=2。正当な ぜんば と同じ近さだった",
+                "ぜんぶ",
+                "以前はここだけ頭と末尾の音まで見て弾いていた",
             ),
-            ("せんく", "ぴんく", "同上"),
-            ("ぜんば", "ぜんぶ", "頭ではなく末尾が「ぶ」に近いので通る"),
+            ("ぜんば", "ぜんぶ", "崩れた言い方も拾う"),
             ("ぜんぷ", "ぜんぶ", "同上"),
             ("あの つゃいろ", "ちゃいろ", "同上"),
             // 長音符
@@ -1462,64 +1458,6 @@ mod tests {
             .collect()
     }
 
-    /// 色の言い間違いが「ぜんぶ」になっていないか、**総当たりで**確かめる。
-    ///
-    /// これだけは取り返しがつかない。遊びがそこで終わる。逆に取りこぼしても
-    /// 次の周回でまた聞けるので、害は釣り合っていない。だから1音の置換を
-    /// 五十音の全部で作って掛ける。
-    ///
-    /// **近い音だけに絞ってはいけない。** 絞っていたせいで、実際にこれを
-    /// 取り逃がしていた。
-    ///
-    /// ```text
-    /// ぴんく → ぜんく → ぜんぶ     ぴ から ぜ は「近い音」ではない
-    /// ```
-    #[test]
-    fn a_color_never_becomes_all() {
-        let m = Matcher::new(2);
-        let kana = kana();
-        let mut fatal: Vec<String> = Vec::new();
-        let mut total = 0;
-
-        for color in <Color as strum::VariantArray>::VARIANTS {
-            let cs: Vec<char> = color.reading().chars().collect();
-            let mut variants: Vec<String> = Vec::new();
-            for i in 0..cs.len() {
-                // 1音を五十音のどれかに置き換える。**絞らない。**
-                for &k in &kana {
-                    if k != cs[i] {
-                        let mut sub = cs.clone();
-                        sub[i] = k;
-                        variants.push(sub.into_iter().collect());
-                    }
-                }
-                let mut drop = cs.clone();
-                drop.remove(i);
-                if !drop.is_empty() {
-                    variants.push(drop.into_iter().collect());
-                }
-            }
-            for v in variants {
-                for input in [v.clone(), format!("えー {v}")] {
-                    total += 1;
-                    if m.find(&input) == Some(Answer::All) {
-                        fatal.push(format!(
-                            "  {input:?} => ぜんぶ（{} のつもり）",
-                            color.reading()
-                        ));
-                    }
-                }
-            }
-        }
-
-        assert!(
-            fatal.is_empty(),
-            "色の言い間違いが「ぜんぶ」になった。遊びが事故で終わる（全 {total} 通り）:\n{}",
-            fatal.join("\n")
-        );
-        eprintln!("  1音置換の総当たり {total} 通り: ぜんぶ誤爆 0");
-    }
-
     /// 別の色に化ける組を固定して見張る。
     ///
     /// 表は起きたことを覚えておくもので、**まだ起きていない崩れ方は拾えない。**
@@ -1585,10 +1523,14 @@ mod tests {
                         format!("どんな いろ が すき {body}"),
                     ] {
                         total += 1;
-                        if let Some(Answer::Single(got)) = m.find(&input) {
-                            if got != *color {
-                                wrong.push((color.reading(), got.reading()));
+                        // **「ぜんぶ」も1組として数える。** 以前はここだけ
+                        // 別枠で落としていた。取り違えは取り違えで、遊びが
+                        // 終わっても「もう1回」を押せばいいだけ。
+                        match m.find(&input) {
+                            Some(got) if got != Answer::Single(*color) => {
+                                wrong.push((color.reading(), got.reading()))
                             }
+                            _ => {}
                         }
                     }
                 }
