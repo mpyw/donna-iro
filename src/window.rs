@@ -198,7 +198,9 @@ fn font() -> &'static fontdue::Font {
 
 fn text_width(s: &str, px: f32) -> i32 {
     let f = font();
-    s.chars().map(|c| f.metrics(c, px).advance_width).sum::<f32>() as i32
+    s.chars()
+        .map(|c| f.metrics(c, px).advance_width)
+        .sum::<f32>() as i32
 }
 
 /// 文字列を `(cx, cy)` を中心に描く。

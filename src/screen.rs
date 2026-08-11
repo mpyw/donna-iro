@@ -60,7 +60,9 @@ pub struct Terminal;
 impl Screen for Terminal {
     fn show(&mut self, frame: Frame) {
         match frame {
-            Frame::Palette(order) if order.as_slice() == Color::VARIANTS => println!("── ぜんぶ ──"),
+            Frame::Palette(order) if order.as_slice() == Color::VARIANTS => {
+                println!("── ぜんぶ ──")
+            }
             Frame::Palette(order) => {
                 let names: Vec<&str> = order.iter().map(|c| c.name()).collect();
                 println!("── {} ──", names.join(" "));

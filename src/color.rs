@@ -1,6 +1,10 @@
 //! 認識対象の色。
 //!
 //! 語彙をここに閉じることで、汎用 ASR に頼らずとも判定できるようにする。
+//!
+//! **色ごとの情報は下の表に1行で書く。** 読み・漢字・RGB・表示名・素材名を
+//! 別々の `match` に散らしていた頃は、色を足すたびに5箇所を回る必要があり、
+//! しかも並びが揃っているかを目で確かめるしかなかった。表なら横に読める。
 
 use strum::{EnumCount, VariantArray};
 
@@ -10,25 +14,163 @@ use strum::{EnumCount, VariantArray};
 /// 読む向きになっていた。色は画面を知らなくても成り立つ。
 pub type Rgb = (u8, u8, u8);
 
-/// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
-/// （しろ・きいろ・きみどり・みどり・みずいろ・あお・むらさき・
-/// ももいろ・あか・だいだい・ちゃいろ・くろ）に揃えてある。
-/// 並び順は画面に出す順（4列×3行）でもある。`VARIANTS` は宣言順に返るので、
-/// 並べ替えたいときはここを触ること。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount, VariantArray)]
-pub enum Color {
-    Red,
-    Blue,
-    Yellow,
-    Green,
-    YellowGreen,
-    White,
-    Black,
-    Pink,
-    Orange,
-    Purple,
-    Brown,
-    LightBlue,
+/// 色の定義から `Color` と、色ごとの値を返す `const fn` を一度に作る。
+///
+/// 項目を1つでも書き忘れれば、その色はパターンに合わずマクロ展開で止まる。
+/// 生成される `match` は網羅的なままなので、変種を足して定義を書き忘れる
+/// こともできない（そもそも変種はここからしか生えない）。
+///
+/// 項目の順番は下のパターンで固定してある。並べ替えたい理由が無いのと、
+/// 揃っていないと読むときに目が滑るため。
+macro_rules! colors {
+    // `kanji` の行が無ければ `None`。漢字表記を持たない色があるので、
+    // 全部の色に `Some(..)` / `None` を書かせるより「無い色は書かない」ほうが
+    // 表として素直に読める。
+    (@kanji) => { None };
+    (@kanji $kanji:literal) => { Some($kanji) };
+
+    ($(
+        $(#[$meta:meta])*
+        $variant:ident: {
+            reading: $reading:literal,
+            $(kanji: $kanji:literal,)?
+            rgb: $rgb:expr,
+            name: $name:literal,
+            stem: $stem:literal,
+        },
+    )*) => {
+        /// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
+        /// （しろ・きいろ・きみどり・みどり・みずいろ・あお・むらさき・
+        /// ももいろ・あか・だいだい・ちゃいろ・くろ）に揃えてある。
+        ///
+        /// 並び順は画面に出す順（4列×3行）でもある。`VARIANTS` は宣言順に
+        /// 返るので、並べ替えたいときは表の行を入れ替えること。
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumCount, VariantArray)]
+        pub enum Color {
+            $($(#[$meta])* $variant,)*
+        }
+
+        impl Color {
+            /// 認識結果にマッチさせる読み。ひらがなの正式形をひとつだけ持つ。
+            ///
+            /// 表記ゆれや聞き間違いを並べていた時期もあったが、
+            /// `initial_prompt` でこの語彙そのものを whisper に教えるように
+            /// したので不要になった。残りのゆれは編集距離で吸収する。
+            pub const fn reading(&self) -> &'static str {
+                match self { $(Color::$variant => $reading,)* }
+            }
+
+            /// 漢字表記。`initial_prompt` は誘導であって強制ではないので、
+            /// whisper は漢字を返すことがある。ひらがなに機械変換できないため、
+            /// 判定用に一形だけ持っておく。カタカナ表記の色は正規化で
+            /// ひらがなに寄るので不要。
+            pub const fn kanji(&self) -> Option<&'static str> {
+                match self { $(Color::$variant => colors!(@kanji $($kanji)?),)* }
+            }
+
+            /// 画面に描く●の色。クレヨン12色の実際の色味に寄せてある。
+            pub const fn rgb(&self) -> Rgb {
+                match self { $(Color::$variant => $rgb,)* }
+            }
+
+            /// ターミナルに出す名前。動作確認用なので読めれば良い。
+            pub const fn name(&self) -> &'static str {
+                match self { $(Color::$variant => $name,)* }
+            }
+
+            /// 音源のファイル名。`assets/<stem>.wav`。
+            pub const fn stem(&self) -> &'static str {
+                match self { $(Color::$variant => $stem,)* }
+            }
+        }
+    };
+}
+
+colors! {
+    Red: {
+        reading: "あか",
+        kanji: "赤",
+        rgb: (230, 0, 18),
+        name: "赤",
+        stem: "red",
+    },
+    Blue: {
+        reading: "あお",
+        kanji: "青",
+        rgb: (0, 104, 183),
+        name: "青",
+        stem: "blue",
+    },
+    Yellow: {
+        reading: "きいろ",
+        kanji: "黄色",
+        rgb: (255, 241, 0),
+        name: "黄",
+        stem: "yellow",
+    },
+    Green: {
+        reading: "みどり",
+        kanji: "緑",
+        rgb: (0, 153, 68),
+        name: "緑",
+        stem: "green",
+    },
+    YellowGreen: {
+        reading: "きみどり",
+        kanji: "黄緑",
+        rgb: (143, 195, 31),
+        name: "黄緑",
+        stem: "yellowgreen",
+    },
+    White: {
+        reading: "しろ",
+        kanji: "白",
+        rgb: (245, 245, 245),
+        name: "白",
+        stem: "white",
+    },
+    Black: {
+        reading: "くろ",
+        kanji: "黒",
+        rgb: (35, 24, 21),
+        name: "黒",
+        stem: "black",
+    },
+    /// 「桃色」とは言われないので漢字表記は持たない。
+    Pink: {
+        reading: "ぴんく",
+        rgb: (233, 84, 140),
+        name: "ピンク",
+        stem: "pink",
+    },
+    /// 「橙」は2歳児の語彙に無いので漢字表記は持たない。
+    Orange: {
+        reading: "おれんじ",
+        rgb: (243, 152, 0),
+        name: "オレンジ",
+        stem: "orange",
+    },
+    Purple: {
+        reading: "むらさき",
+        kanji: "紫",
+        rgb: (146, 7, 131),
+        name: "紫",
+        stem: "purple",
+    },
+    Brown: {
+        reading: "ちゃいろ",
+        kanji: "茶色",
+        rgb: (122, 69, 26),
+        name: "茶",
+        stem: "brown",
+    },
+    LightBlue: {
+        reading: "みずいろ",
+        kanji: "水色",
+        rgb: (0, 160, 233),
+        name: "水色",
+        stem: "lightblue",
+    },
 }
 
 impl Color {
@@ -53,101 +195,6 @@ impl Color {
         out
     }
 
-    /// 認識結果にマッチさせる読み。ひらがなの正式形をひとつだけ持つ。
-    ///
-    /// 表記ゆれや聞き間違いを並べていた時期もあったが、
-    /// `initial_prompt` でこの語彙そのものを whisper に教えるように
-    /// したので不要になった。残りのゆれは編集距離で吸収する。
-    pub const fn reading(&self) -> &'static str {
-        match self {
-            Color::Red => "あか",
-            Color::Blue => "あお",
-            Color::Yellow => "きいろ",
-            Color::Green => "みどり",
-            Color::YellowGreen => "きみどり",
-            Color::White => "しろ",
-            Color::Black => "くろ",
-            Color::Pink => "ぴんく",
-            Color::Orange => "おれんじ",
-            Color::Purple => "むらさき",
-            Color::Brown => "ちゃいろ",
-            Color::LightBlue => "みずいろ",
-        }
-    }
-
-    /// 漢字表記。`initial_prompt` は誘導であって強制ではないので、
-    /// whisper は漢字を返すことがある。ひらがなに機械変換できないため、
-    /// 判定用に一形だけ持っておく。カタカナ表記の色は正規化で
-    /// ひらがなに寄るので不要。
-    pub const fn kanji(&self) -> Option<&'static str> {
-        match self {
-            Color::Red => Some("赤"),
-            Color::Blue => Some("青"),
-            Color::Yellow => Some("黄色"),
-            Color::Green => Some("緑"),
-            Color::YellowGreen => Some("黄緑"),
-            Color::White => Some("白"),
-            Color::Black => Some("黒"),
-            Color::Purple => Some("紫"),
-            Color::Brown => Some("茶色"),
-            Color::LightBlue => Some("水色"),
-            Color::Pink | Color::Orange => None,
-        }
-    }
-
-    /// ターミナルに描く●の色。クレヨン12色の実際の色味に寄せてある。
-    pub const fn rgb(&self) -> Rgb {
-        match self {
-            Color::Red => (230, 0, 18),
-            Color::Blue => (0, 104, 183),
-            Color::Yellow => (255, 241, 0),
-            Color::Green => (0, 153, 68),
-            Color::YellowGreen => (143, 195, 31),
-            Color::White => (245, 245, 245),
-            Color::Black => (35, 24, 21),
-            Color::Pink => (233, 84, 140),
-            Color::Orange => (243, 152, 0),
-            Color::Purple => (146, 7, 131),
-            Color::Brown => (122, 69, 26),
-            Color::LightBlue => (0, 160, 233),
-        }
-    }
-
-    /// ターミナルに出す名前。動作確認用なので読めれば良い。
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Color::Red => "赤",
-            Color::Blue => "青",
-            Color::Yellow => "黄",
-            Color::Green => "緑",
-            Color::YellowGreen => "黄緑",
-            Color::White => "白",
-            Color::Black => "黒",
-            Color::Pink => "ピンク",
-            Color::Orange => "オレンジ",
-            Color::Purple => "紫",
-            Color::Brown => "茶",
-            Color::LightBlue => "水色",
-        }
-    }
-
-    pub const fn stem(&self) -> &'static str {
-        match self {
-            Color::Red => "red",
-            Color::Blue => "blue",
-            Color::Yellow => "yellow",
-            Color::Green => "green",
-            Color::YellowGreen => "yellowgreen",
-            Color::White => "white",
-            Color::Black => "black",
-            Color::Pink => "pink",
-            Color::Orange => "orange",
-            Color::Purple => "purple",
-            Color::Brown => "brown",
-            Color::LightBlue => "lightblue",
-        }
-    }
-
     pub fn random() -> Color {
         use rand::seq::SliceRandom;
         *Color::VARIANTS.choose(&mut rand::thread_rng()).unwrap()
@@ -167,5 +214,18 @@ mod tests {
 
         assert_eq!(ALL.as_slice(), Color::VARIANTS, "一覧が VARIANTS とずれた");
         assert_eq!(RED, "あか");
+    }
+
+    /// 素材名はファイル名になるので、日本語や大文字が混ざると事故る。
+    /// 表に手で書く列なので、形だけ見ておく。
+    #[test]
+    fn stems_are_lowercase_ascii() {
+        for c in Color::VARIANTS {
+            let stem = c.stem();
+            assert!(
+                stem.chars().all(|ch| ch.is_ascii_lowercase()),
+                "素材名が小文字の ASCII でない: {stem}"
+            );
+        }
     }
 }
