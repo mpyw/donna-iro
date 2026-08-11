@@ -67,10 +67,14 @@ fontdue = { version = "0.9", optional = true }
 
 # 音声認識: whisper.cpp の Rust バインディング
 whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }
+# 設定の読み込み。全 OS で使うので、下の macOS 専用の節に置いてはいけない。
+figment = { version = "0.10", features = ["toml", "env"] }
 
 # macOS では Metal を既定で有効にする。GPU を使うので CPU より数倍速い。
 # フィーチャーは同じ依存の宣言どうしで合流するので、ここで足すだけでよい。
 # ラズパイには Metal が無いため、この節ごと効かない。
+# ここは **macOS でしか効かない**。全 OS で使うものを置くと、ラズパイで
+# 「そんな crate は無い」とコンパイルが止まる。実際に figment がここに
+# 紛れていて、macOS では通るので気づけなかった。
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16", optional = true, features = ["metal"] }
-figment = { version = "0.10.19", features = ["toml", "env"] }

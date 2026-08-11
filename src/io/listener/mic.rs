@@ -197,6 +197,12 @@ fn load_model(cfg: &Config) -> Result<WhisperContext> {
     }
 }
 
+fn threads() -> i32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,10 +216,4 @@ mod tests {
         // 色を足したら伸びる。取りこぼすと whisper が漢字に化ける。
         assert_eq!(VOCABULARY.matches(JOIN).count(), Answer::COUNT - 1);
     }
-}
-
-fn threads() -> i32 {
-    std::thread::available_parallelism()
-        .map(|n| n.get() as i32)
-        .unwrap_or(4)
 }

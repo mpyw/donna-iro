@@ -247,11 +247,11 @@ mod tests {
     }
 
     /// 台本を渡して遊ばせ、鳴った順を返す。
-    fn played(answers: &[Option<&'static str>], again: usize) -> Vec<Cue> {
+    fn played(answers: Vec<Option<&'static str>>, again: usize) -> Vec<Cue> {
         let tape = Tape::default();
         Game::new(
             Box::new(tape.clone()),
-            Box::new(Script(answers.to_vec().into_iter())),
+            Box::new(Script(answers.into_iter())),
             Box::new(Blind),
             Box::new(Again(again)),
             &Config::default(),
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn answering_a_color_plays_its_phrase() {
         assert_eq!(
-            played(&[Some("あか")], 0),
+            played(vec![Some("あか")], 0),
             [
                 Cue::Intro,
                 Cue::Question,
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn unheard_answer_still_plays_some_color() {
-        let cues = played(&[None], 0);
+        let cues = played(vec![None], 0);
         // 黙ってはいけない。ランダムな色に倒す。
         assert!(
             matches!(cues[2], Cue::Color(_)),
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn a_break_comes_every_third_round() {
-        let cues = played(&[Some("あか"); 6], 0);
+        let cues = played(vec![Some("あか"); 6], 0);
         let breaks: Vec<Cue> = cues
             .iter()
             .filter(|c| matches!(c, Cue::Bridge | Cue::Interlude))
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn only_the_interlude_gets_a_run_up() {
-        let cues = played(&[Some("あか"); 6], 0);
+        let cues = played(vec![Some("あか"); 6], 0);
         // 助走（tail-lead）は間奏の直前だけ。ブリッジの前は素の tail。
         let lead = cues
             .iter()
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn again_replays_from_the_intro() {
-        let cues = played(&[], 1);
+        let cues = played(vec![], 1);
         // 1周目 → もう1回 → 2周目。イントロから鳴らし直す。
         assert_eq!(
             cues,

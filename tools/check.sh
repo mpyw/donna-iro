@@ -15,6 +15,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# clippy で見る。check のスーパーセットなので、これ1本でよい。
+#
 # 検査する組み合わせ。名前 : 引数 : 警告を落とすか。
 combos=(
   "既定                 :               :strict"
@@ -40,7 +42,7 @@ for entry in "${combos[@]}"; do
   args="${rest%:*}"
   mode="${rest##*:}"
   # shellcheck disable=SC2086
-  out="$(cargo check --all-targets $args 2>&1)"
+  out="$(cargo clippy --all-targets $args 2>&1)"
   code=$?
   warn="$(printf '%s' "$out" | grep -c '^warning:')"
 
@@ -60,6 +62,37 @@ for entry in "${combos[@]}"; do
 done
 
 printf '%s\n' "--------------------------------------------------------"
+
+# コードが使う crate が Linux（ラズパイ）の依存グラフに居るか。
+#
+# **figment が macOS 専用の節に紛れていて、ラズパイではビルドできない状態に
+# なっていた。** macOS 上で feature をいくら回しても出ない類の事故なので、
+# 依存グラフのほうから見る。実際にクロスコンパイルはしない（whisper.cpp と
+# ALSA のツールチェーンが要る）ので、これは代用品。
+linux_deps="$(cargo tree --target aarch64-unknown-linux-gnu --prefix none 2>/dev/null |
+  awk '{print $1}' | tr - _ | sort -u)"
+if [ -z "$linux_deps" ]; then
+  printf '%-22s %s\n' "Linux の依存" "調べられなかった（cargo tree が失敗）"
+else
+  missing=""
+  # crate 内のモジュール（main.rs が宣言しているもの）は外部 crate ではない。
+  local_mods="$(grep -oE '^mod [a-z_]+' src/main.rs | awk '{print $2}')"
+  used="$(grep -rhoE '^[[:space:]]*use [a-z][a-z0-9_]*' src --include='*.rs' |
+    awk '{print $2}' | tr - _ | sort -u)"
+  for c in $used; do
+    case "$c" in std|core|alloc|crate|self|super) continue ;; esac
+    printf '%s\n' "$local_mods" | grep -qx "$c" && continue
+    printf '%s\n' "$linux_deps" | grep -qx "$c" || missing="$missing $c"
+  done
+  if [ -n "$missing" ]; then
+    printf '%-22s %s\n' "Linux の依存" "NG:$missing が Linux 側に無い"
+    echo "  Cargo.toml の [target.'cfg(target_os = \"macos\")'.dependencies] に" >&2
+    echo "  紛れていないか見ること。" >&2
+    fail=1
+  else
+    printf '%-22s %s\n' "Linux の依存" "そろっている"
+  fi
+fi
 
 if cargo test --all-targets >/tmp/donna-check-test.log 2>&1; then
   printf '%-22s %s\n' "テスト" "$(grep -h '^test result' /tmp/donna-check-test.log | head -1)"

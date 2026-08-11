@@ -402,9 +402,8 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
         }))
         .collect();
     let mut cur: Vec<usize> = vec![0; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
+    for ca in a {
         cur[0] = prev[0] + indel(*ca);
-        let _ = i;
         for (j, cb) in b.iter().enumerate() {
             cur[j + 1] = (prev[j + 1] + indel(*ca))
                 .min(cur[j] + indel(*cb))
