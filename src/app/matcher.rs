@@ -421,7 +421,7 @@ mod tests {
 
     use super::*;
 
-    fn find(s: &str) -> Option<Answer> {
+    pub fn find(s: &str) -> Option<Answer> {
         Matcher::new(2).find(s)
     }
     fn c(x: Color) -> Option<Answer> {

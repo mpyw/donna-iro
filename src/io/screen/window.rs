@@ -89,7 +89,7 @@ pub fn run(rx: Receiver<Frame>, again: Sender<()>) -> Result<()> {
     Ok(())
 }
 
-fn rgb(c: Rgb) -> u32 {
+pub fn rgb(c: Rgb) -> u32 {
     ((c.0 as u32) << 16) | ((c.1 as u32) << 8) | c.2 as u32
 }
 
@@ -106,7 +106,7 @@ fn paint(buf: &mut [u32], frame: Frame) {
 }
 
 /// 全色を並べる。`shade` で暗くできる。
-fn palette(buf: &mut [u32], order: &[Color], shade: f32) {
+pub fn palette(buf: &mut [u32], order: &[Color], shade: f32) {
     // 4列×3行。テレビで見たときに一番収まりがいい。
     let cols = 4usize;
     let rows = order.len().div_ceil(cols);

@@ -71,7 +71,7 @@ static VOCABULARY_BYTES: [u8; vocabulary_len()] = {
 /// 読みを足していく方式では追いつかない。出力そのものを寄せる。
 ///
 /// 語彙は `Answer` から出るので、色を足せばここも伸びる。
-pub const VOCABULARY: &str = match std::str::from_utf8(&VOCABULARY_BYTES) {
+const VOCABULARY: &str = match std::str::from_utf8(&VOCABULARY_BYTES) {
     Ok(s) => s,
     Err(_) => panic!("語彙は UTF-8 のはず"),
 };
