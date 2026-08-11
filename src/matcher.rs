@@ -437,6 +437,24 @@ mod tests {
             "長い順でない: {lens:?}"
         );
 
+        // 同じ長さなら読みが先。**並べ替えが安定であることに依存している。**
+        // 不安定なものに差し替えるとここで落ちる。「あかあお」のように
+        // 繋がって認識されたとき、どちらを採るかが変わってしまうため。
+        let is_kanji = |(a, r): &(Answer, &str)| a.kanji() == Some(*r);
+        for w in CANDIDATES.windows(2) {
+            if w[0].1.chars().count() == w[1].1.chars().count() && is_kanji(&w[0]) {
+                assert!(is_kanji(&w[1]), "同じ長さで漢字のあとに読みが来た");
+            }
+        }
+
+        // 同じ長さの読みどうしは宣言順。先に宣言した色が先に当たる。
+        let two: Vec<&str> = CANDIDATES
+            .iter()
+            .filter(|c| c.1.chars().count() == 2 && !is_kanji(c))
+            .map(|c| c.1)
+            .collect();
+        assert_eq!(two, ["あか", "あお", "しろ", "くろ"], "宣言順が崩れた");
+
         // const で数えた丈が、実際に数えたものと合っているか。
         let kanji = Answer::every()
             .iter()
