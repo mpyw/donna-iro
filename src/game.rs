@@ -74,6 +74,9 @@ impl Game {
     pub fn run(&mut self) -> Result<()> {
         loop {
             self.play_through()?;
+            // 待っていることを画面に出してから待つ。黙って止まっていると、
+            // 終わったのか固まったのか区別がつかない。
+            self.screen.show(Frame::Again);
             if !self.control.wait() {
                 return Ok(());
             }

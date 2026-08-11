@@ -11,7 +11,8 @@ default = ["whisper", "window"]
 whisper = ["dep:whisper-rs"]
 # ウィンドウに丸を描く。テレビに映すのはこちらが本命。
 # 外すとターミナルに色名を出すだけになる。
-window = ["dep:minifb"]
+# 「もう1回」のボタンに文字を出すので、フォントの描画もここに付いてくる。
+window = ["dep:minifb", "dep:fontdue"]
 
 # --- バイナリへの埋め込み ---
 #
@@ -46,6 +47,10 @@ serde = { version = "1", features = ["derive"] }
 cpal = "0.15"
 rodio = "0.19"
 minifb = { version = "0.28", optional = true }
+# 文字のラスタライズ。minifb は文字を出せないので、これで自前で描く。
+# 純 Rust で C 依存が無いため、ラズパイでも素直に通る。
+# フォントは fonts/again.ttf（「もう1回」の4文字だけのサブセット、4KB）。
+fontdue = { version = "0.9", optional = true }
 
 # 音声認識: whisper.cpp の Rust バインディング
 whisper-rs = { version = "0.16", optional = true, features = ["log_backend"] }
