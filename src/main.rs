@@ -39,8 +39,8 @@ fn main() -> Result<()> {
         config: config::load(explicit.as_deref())?,
     };
 
-    // 遊んでいる最中に落ちないよう、素材は先に確かめる。
-    io::audio::check_assets(&opts.config)?;
+    // 在処を決めて、揃っているかまで見る。遊んでいる最中に落ちないように。
+    io::audio::configure(&opts.config)?;
 
     if opts.terminal {
         let control: Box<dyn Control> = if opts.once {

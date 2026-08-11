@@ -67,9 +67,13 @@ fn asset_dir_override() -> Option<PathBuf> {
     OVERRIDE.get().cloned().flatten()
 }
 
-/// 起動時に一度だけ呼ぶ。
-pub fn configure(cfg: &Config) {
+/// **起動時に一度だけ呼ぶ。** 素材の在処を決めて、揃っているかまで見る。
+///
+/// 在処を決めただけで先に進むと、足りないことに気づくのが遊んでいる最中に
+/// なる。決めることと確かめることは離しても意味が無いので、ひとつにまとめる。
+pub fn configure(cfg: &Config) -> Result<()> {
     let _ = OVERRIDE.set(cfg.paths.assets());
+    check_assets()
 }
 
 fn asset_path(stem: &str) -> PathBuf {
@@ -97,7 +101,7 @@ fn asset_dir() -> &'static Path {
             eprintln!("  本番音源が無いので合成音を使う: {}", reference.display());
             return reference;
         }
-        // どちらも欠けている。check_assets に本番側のパスで報告させる。
+        // どちらも欠けている。確認の側に本番側のパスで報告させる。
         main
     })
 }
@@ -188,12 +192,10 @@ fn embedded(stem: &str) -> Option<&'static [u8]> {
     FILES.iter().find(|(n, _)| *n == stem).map(|(_, b)| *b)
 }
 
-/// 素材が揃っているか起動時に確かめる。
+/// 素材が揃っているか確かめる。足りないものはまとめて出す。
 ///
-/// 途中で足りないと気づくと、遊んでいる最中に落ちる。
-/// 足りないものはまとめて出す。
-pub fn check_assets(cfg: &Config) -> Result<()> {
-    configure(cfg);
+/// 在処が決まっていることが前提なので、`configure` からしか呼ばない。
+fn check_assets() -> Result<()> {
     let missing: Vec<&str> = Cue::every()
         .into_iter()
         .filter(|&c| Media::open(c).is_err())

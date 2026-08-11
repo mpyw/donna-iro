@@ -303,6 +303,7 @@ macOS ではウィンドウをメインスレッドに置く必要があり、`c
 
 | | |
 | --- | --- |
+| `tools/check.sh` | 全 feature の組み合わせでコンパイル・テスト・書式を確かめる |
 | `tools/fetch-model.sh` | whisper のモデルを取得 |
 | `tools/bundle-mac.sh` | macOS の `.app` を作る（Metal + 埋め込み） |
 | `tools/split_score.py` | 元譜面から素材ごとの MusicXML を切り出す |
