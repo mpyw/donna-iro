@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use super::Control;
+use crate::app::control::Control;
 
 /// 標準入力を1行読む。ターミナル構成用。
 ///

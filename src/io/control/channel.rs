@@ -1,6 +1,6 @@
 //! ウィンドウ（や将来の CEC リモコン）から届く合図で待つ実装。
 
-use super::Control;
+use crate::app::control::Control;
 
 /// ウィンドウから届く合図を待つ。
 ///

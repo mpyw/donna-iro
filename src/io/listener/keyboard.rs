@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use super::Listener;
+use crate::app::listener::Listener;
 
 /// 標準入力から色名を打つ。音源と進行の確認用。
 pub struct Keyboard;

@@ -185,100 +185,103 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 
 ## 構成
 
-**トレイトを持つものは、抽象を親に、実装を子に置く。** 親を見れば何がどう
-抽象化されているかだけが読めて、実装を飛ばさなくてよい。
+**`app` は遊びそのもの、`io` は外の世界に触るもの。** `app` は装置にも
+ファイルにも触らず、何を鳴らすか・何を映すか・聞こえたものをどう解釈するか
+までを決めてトレイトに渡す。実体は `io` にあり、`main` が繋ぐ。
+
+**`app` から `io` を読んではいけない。** 逆は構わない。この向きが守られて
+いる限り、遊びの側は装置なしで組み立てられる（`app/game.rs` のテストが
+実際にそうしている）。
+
+```mermaid
+flowchart TD
+    main["main.rs"]
+
+    subgraph app["app — 遊び。装置に触らない"]
+        game["game.rs"]
+        matcher["matcher.rs"]
+        cue["cue.rs"]
+        color["color.rs"]
+        config["config.rs"]
+        screen["screen.rs"]
+        listener["listener.rs"]
+        control["control.rs"]
+        player["player.rs"]
+    end
+
+    subgraph io["io — 外の世界"]
+        ioscreen["screen/"]
+        iolistener["listener/"]
+        iocontrol["control/"]
+        ioplayer["player/"]
+        audio["audio/"]
+        ioconfig["config.rs"]
+    end
+
+    main --> game
+    main --> ioscreen
+    main --> iolistener
+    main --> iocontrol
+    main --> ioplayer
+    main --> ioconfig
+
+    game --> matcher
+    game --> cue
+    game --> screen
+    game --> listener
+    game --> control
+    game --> player
+
+    matcher --> color
+    cue --> color
+    screen --> color
+    player --> cue
+
+    ioscreen --> screen
+    iolistener --> listener
+    iocontrol --> control
+    ioplayer --> player
+    ioconfig --> config
+    iolistener --> audio
+    ioplayer --> audio
+
+    classDef base fill:#eee,stroke:#999,color:#333;
+    class color,config base;
+```
+
+矢印は `app` の中では下を向き、`io` からは `app` へ向かう。**`app` から
+`io` へ出る矢印は1本も無い。**
+
+### app — 遊び
 
 | | |
 | --- | --- |
 | `color.rs` | 色の定義（読み・漢字・RGB・名前）と、子どもの応答 `Answer` |
 | `cue.rs` | 鳴らす素材。文字列ではなく型で指す |
 | `matcher.rs` | 応答の判定 |
-| `audio.rs` | 再生（`Player`）と録音（`Ears`）、素材の在処 |
-| `config.rs` | 設定の読み込み（既定 → `config.toml` → 環境変数） |
+| `config.rs` | 設定の値と既定値。**読み込みは `io`** |
 | `game.rs` | 進行 |
-| `main.rs` | 組み立て |
+| `screen.rs` | `Frame` と `Screen`。どこに映すか |
+| `listener.rs` | `Listener`。色をどう受け取るか |
+| `control.rs` | `Control`。「もう1回」をどう受け取るか |
+| `player.rs` | `Player`。素材をどう鳴らすか |
 
-| トレイト | 実装 |
+### io — 外の世界
+
+| | |
 | --- | --- |
-| `screen.rs` — `Frame` と `Screen`。どこに映すか | `screen/terminal.rs` 色名を出すだけ<br>`screen/window.rs` ウィンドウ描画。丸と「もう1回」のボタン |
-| `listener.rs` — `Listener`。色をどう受け取るか | `listener/keyboard.rs` 手打ち<br>`listener/mic.rs` マイクと whisper |
-| `control.rs` — `Control`。「もう1回」をどう受け取るか | `control/channel.rs` ウィンドウ / CEC<br>`control/stdin.rs` ターミナル<br>`control/never.rs` `--once` |
-
-### 依存の層
-
-**覚える規則はひとつだけ。矢印はすべて下を向いている。**
-どのファイルが何をするかは、すぐ上の表を見ること。
-
-```mermaid
-flowchart TD
-    main["main.rs"]
-    game["game.rs"]
-    listener["listener.rs"]
-    audio["audio.rs"]
-    matcher["matcher.rs"]
-    control["control.rs"]
-    screen["screen.rs"]
-    cue["cue.rs"]
-    color["color.rs"]
-    config["config.rs"]
-
-    main --> game
-    main --> listener
-    main --> audio
-    main --> control
-    main --> screen
-
-    game --> listener
-    game --> audio
-    game --> matcher
-    game --> control
-    game --> screen
-    game --> cue
-
-    listener --> audio
-    audio --> cue
-
-    main -.-> config
-    game -.-> config
-    game -.-> color
-    listener -.-> config
-    listener -.-> color
-    audio -.-> config
-    cue -.-> color
-    matcher -.-> color
-    screen -.-> color
-
-    classDef base fill:#eee,stroke:#999,color:#333;
-    class color,config base;
-```
-
-**点線は、どこからでも読まれる土台（`color.rs` と `config.rs`）への依存。**
-構造を追いたいときは実線だけ見ればよい。
-
-**全部を知っているのは `main.rs` だけ**で、そこから下るほど視野が狭くなる。
-どこを読めばいいか迷ったら、変えたい振る舞いに一番近いところから入って、
-下に降りることはあっても上に戻ることはない、と思ってよい。
-
-正確な辺は次のとおり（図が読めない環境向けに、こちらが正）。**子モジュールは
-親に畳んである。** 分けたのはファイルの都合で、依存の形は変わらないため。
-
-| 何が | 何を読むか |
-| --- | --- |
-| `main.rs` | `game` `listener` `audio` `control` `screen` `config` |
-| `game.rs` | `listener` `audio` `matcher` `control` `screen` `cue` `color` `config` |
-| `listener.rs` | `audio` `color` `config` |
-| `audio.rs` | `cue` `config` |
-| `cue.rs` `matcher.rs` `screen.rs` | `color` |
-| `color.rs` `config.rs` `control.rs` | なし |
-
-**例外はない。輪はどこにもなく、依存は完全な一方向。**
-
-`color.rs` `config.rs` `control.rs` は何にも依存しない。色の定義・設定・
-「もう1回」は、どれも遊びの中身を知らなくても成り立つため。
-
-`Rgb`（`(u8, u8, u8)`）は `color.rs` にある。以前は `screen.rs` に置いて
-いて、そのせいで色が画面を読む向きになっていた。**色は画面を知らなくても
-成り立つ**ので、色の側の言葉は色の側に置く。
+| `screen/terminal.rs` | 色名を出すだけ |
+| `screen/window.rs` | ウィンドウ描画。丸と「もう1回」のボタン |
+| `listener/keyboard.rs` | 手打ち |
+| `listener/mic.rs` | マイクと whisper |
+| `control/channel.rs` | ウィンドウ / CEC |
+| `control/stdin.rs` | ターミナル |
+| `control/never.rs` | `--once` |
+| `player/speakers.rs` | rodio で鳴らす |
+| `audio/assets.rs` | 素材の在処。ファイルか、埋め込みか |
+| `audio/clip.rs` | 復号済みの音。長さと末尾の無音を測る |
+| `audio/ears.rs` | cpal で録る。開きっぱなしにして切り出す |
+| `config.rs` | figment で読む（ファイル・環境変数） |
 
 macOS ではウィンドウをメインスレッドに置く必要があり、`cpal::Stream` も
 `rodio::OutputStream` も `!Send` なので、**ゲーム側をワーカースレッドに出して
