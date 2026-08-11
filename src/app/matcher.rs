@@ -224,11 +224,8 @@ impl Matcher {
                 // ここで結合の**部分一致**に譲らないのが要点。譲ると
                 // 「みじろ、きいろ」が きいろ になり、幻覚の継ぎ足しを
                 // 捨てる仕掛けが壊れる。
-                // **同点で「ぜんぶ」を勝たせない。** 単独が All で結合が色
-                // なら、同じ距離でも結合の色を採る。
                 Some((sa, sd)) => Some(match joined.and_then(|j| self.nearest(j)) {
                     Some((ja, jd)) if jd < sd => ja,
-                    Some((ja, jd)) if jd == sd && sa == Answer::All && ja != Answer::All => ja,
                     _ => sa,
                 }),
                 // 乗っていない。**部分一致のほうが音の近さより確か。**
@@ -304,14 +301,15 @@ impl Matcher {
         //
         // 3文字以上は1音半まで許す。
         //
-        // **「ぜんぶ」だけは1音までに絞る。** 誤検出するとゲームが終わって
-        // しまうため。緩めると「でんわ」あたりが引っかかる。
-        // 逆に取りこぼしても次の周回でまた聞けるので、そちらの害は小さい。
-        const fn allowed(answer: Answer, skeleton_len: usize) -> usize {
-            match answer {
-                Answer::All => 4,
-                Answer::Single(_) if skeleton_len <= 2 => 2,
-                Answer::Single(_) => 6,
+        // **「ぜんぶ」も同じ扱い。** 以前はここだけ厳しくしていた。誤爆すると
+        // 遊びが終わるから、という理屈だったが、実際に起きたのは逆で
+        // 「ぜんぶ」と言ったのに拾えないほうだった（「きゃんぶ」→ ぴんく）。
+        // 間違って終わっても「もう1回」を押せばいい。
+        const fn allowed(skeleton_len: usize) -> usize {
+            if skeleton_len <= 2 {
+                2
+            } else {
+                6
             }
         }
 
@@ -340,16 +338,7 @@ impl Matcher {
             } else {
                 r.len().min(chars.len())
             };
-            if d > allowed(*a, len) {
-                continue;
-            }
-            let truncated = r.starts_with(chars.as_slice());
-            let len = if truncated {
-                r.len()
-            } else {
-                r.len().min(chars.len())
-            };
-            if d > allowed(*a, len) {
+            if d > allowed(len) {
                 continue;
             }
             scores.push((*a, d));
@@ -357,17 +346,6 @@ impl Matcher {
         scores.sort_by_key(|&(_, d)| d);
 
         let (best, best_d) = *scores.first()?;
-        // **「ぜんぶ」は五分の勝負を勝ってはいけない。** 誤爆は取り返しが
-        // つかないが、取りこぼしは次の周回で拾える。同じ距離に色が居るなら
-        // 色を採る。
-        if best == Answer::All {
-            if let Some(&(color, _)) = scores
-                .iter()
-                .find(|&&(a, d)| d == best_d && a != Answer::All)
-            {
-                return Some((color, best_d));
-            }
-        }
         // 同点なら諦める。「あか」と「あお」、「しろ」と「くろ」のように
         // 1文字違いの色があるので、割れたまま採用すると取り違える。
         if scores.get(1).is_some_and(|&(_, d)| d == best_d) {
@@ -981,12 +959,52 @@ mod tests {
         );
     }
 
+    /// **「ぜんぶ」を特別扱いしない代償。**
+    ///
+    /// 以前はここだけ許容を絞り、頭と末尾の音まで見て弾いていた。それを
+    /// やめたので、遠い語も「ぜんぶ」になる。間違って終わっても「もう1回」を
+    /// 押せばいいだけで、拾えないほうが遊べなくなる、という判断。
+    ///
+    /// **代償は隠さずここに並べる。** 増えたら、まだ釣り合っているか考えること。
     #[test]
-    fn all_does_not_fire_on_distant_words() {
-        // 音が2つずれるものまで拾うとゲームが事故で終わる。
-        assert_ne!(find("でんわ"), Some(Answer::All));
-        assert_ne!(find("わんわん"), Some(Answer::All));
-        assert_ne!(find("ごはん"), Some(Answer::All));
+    fn words_that_end_the_game_by_mistake() {
+        const REAL_WORDS: &[&str] = &[
+            "でんわ",
+            "こんぶ",
+            "おんぶ",
+            "さんぽ",
+            "わんわん",
+            "ごはん",
+            "はんぶん",
+            "あそぶ",
+            "りんご",
+            "でんしゃ",
+            "えほん",
+            "なんで",
+            "ぱん",
+            "みかん",
+            "うんち",
+            "ぽんぽん",
+            "たんぽぽ",
+            "でんき",
+            "げんき",
+            "えんぴつ",
+            "しんぶん",
+            "こんにちは",
+            "どんぐり",
+            "とぶ",
+            "よぶ",
+            "ころぶ",
+        ];
+        // 現状ここで終わってしまう語。**減るぶんには構わない。**
+        const ENDS: &[&str] = &["でんわ", "こんぶ", "おんぶ", "さんぽ"];
+
+        let ends: Vec<&str> = REAL_WORDS
+            .iter()
+            .copied()
+            .filter(|w| find(w) == Some(Answer::All))
+            .collect();
+        assert_eq!(ends, ENDS, "\n事故で終わる語が変わった");
     }
 
     #[test]
@@ -1555,6 +1573,7 @@ mod tests {
             ("あか", "あお", 4),
             ("みずいろ", "くろ", 2),
             ("みどり", "しろ", 2),
+            ("ぴんく", "ぜんぶ", 1),
         ];
 
         let mut seen: Vec<(&str, &str, usize)> = Vec::new();
