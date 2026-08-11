@@ -241,9 +241,17 @@ impl Matcher {
                     // 位置は最優先だが、先頭がどの段にも乗らなかった以上、
                     // その位置に主張は無い。譲って次の位置に任せる。
                     // 割れた語（「じゃん ぶー」）は結合のほうが近いので残る。
+                    //
+                    // **譲るのは負けたときだけ。** 同点で譲ると、同じ
+                    // 発話が区間の割れ方だけで別の色になる。
+                    //
+                    // ```text
+                    // みずろ   => みずいろ
+                    // み ずろ  => くろ      （結合と次の区間が同点）
+                    // ```
                     let (a, d) = joined.and_then(|j| self.nearest(j))?;
                     match parts.get(i + 1).and_then(|n| self.nearest(n)) {
-                        Some((_, next_d)) if next_d <= d => None,
+                        Some((_, next_d)) if next_d < d => None,
                         _ => Some(a),
                     }
                 }),
@@ -1151,6 +1159,13 @@ mod tests {
                 "結合の音の近さが、次の区間単独の確かな一致を潰していた",
             ),
             ("えー かろ", "くろ", "同上"),
+            ("みずろ", "みずいろ", "割れていない形"),
+            (
+                "み ずろ",
+                "みずいろ",
+                "同点で次に譲ると、割れ方だけで別の色になっていた",
+            ),
+            ("きみ どどり", "きみどり", "同上"),
             ("あの つゃいろ", "ちゃいろ", "同上"),
             // 長音符
             (
@@ -1294,20 +1309,33 @@ mod tests {
         };
 
         let mut fatal: Vec<String> = Vec::new();
-        let mut wrong: Vec<String> = Vec::new();
+        // どの読みが、どの読みに化けたか。
+        let mut wrong: Vec<(&str, &str)> = Vec::new();
         let mut total = 0;
 
         for color in <Color as strum::VariantArray>::VARIANTS {
-            let want = Answer::Single(*color);
             for v in mutations(color.reading()) {
-                // 前後に何か付く形も見る。実際そう届く。
-                for input in [v.clone(), format!("えー {v}"), format!("{v}だよ")] {
+                // 前後に何か付く形と、**区間が割れた形**も見る。実際そう届く。
+                //
+                // 割れた形を入れていなかったので、「同点で次に譲る」の
+                // 取り違え（同じ発話が割れ方だけで別の色になる）を作れて
+                // いなかった。
+                let split: Vec<String> = (1..v.chars().count())
+                    .map(|at| {
+                        let (a, b) = v.split_at(v.char_indices().nth(at).unwrap().0);
+                        format!("{a} {b}")
+                    })
+                    .collect();
+                let forms = [v.clone(), format!("えー {v}"), format!("{v}だよ")]
+                    .into_iter()
+                    .chain(split);
+                for input in forms {
                     total += 1;
                     match m.find(&input) {
                         // これだけは絶対に起きてはいけない。
                         Some(Answer::All) => fatal.push(format!("  {input:?} => ぜんぶ")),
-                        Some(got) if got != want => {
-                            wrong.push(format!("  {input:?} => {got:?}（{color:?} のつもり）"))
+                        Some(Answer::Single(got)) if got != *color => {
+                            wrong.push((color.reading(), got.reading()))
                         }
                         _ => {}
                     }
@@ -1321,14 +1349,41 @@ mod tests {
             fatal.join("\n")
         );
 
-        // 化ける数の見張り。**増えたら、増やしてよいのか考えること。**
-        // 減るぶんには構わないので、下限は見ない。
-        let limit = 20;
-        assert!(
-            wrong.len() <= limit,
-            "別の色に化ける数が {} 件（上限 {limit} / 全 {total} 通り）。\n{}",
-            wrong.len(),
-            wrong.join("\n")
+        // 化ける形の見張り。**数だけ見ていると、入れ替わったのを見逃す。**
+        // どの読みがどの読みに化けたかで数える。
+        //
+        // ここに載っているのは、どれも人間が聞いても割れるもの。
+        // 「みどり」は きみどり の脱落形でもある、という類。
+        // **増えたり、新しい組が出たら、許してよいのか考えること。**
+        const ALLOWED: &[(&str, &str, usize)] = &[
+            // 「みどり」は きみどり に丸ごと入っている。頭が崩れれば
+            // そちらに落ちる。どちらも緑なので、外れ方として一番軽い。
+            ("きみどり", "みどり", 20),
+            // 骨格にすると ちいろ / しろ で1音違い。人が聞いても割れる。
+            ("ちゃいろ", "しろ", 4),
+            // みずいろ の頭が崩れると ちゃいろ の骨格に寄る。
+            ("みずいろ", "ちゃいろ", 4),
+            // 以下は**二重に崩れた形**（重複＋区間割れ）。
+            // 「ああ か」「おお れんじ」「みい ずろ」。
+            ("あか", "あお", 1),
+            ("おれんじ", "あお", 1),
+            ("みずいろ", "くろ", 1),
+        ];
+
+        let mut seen: Vec<(&str, &str, usize)> = Vec::new();
+        for (want, got) in &wrong {
+            match seen.iter_mut().find(|(w, g, _)| w == want && g == got) {
+                Some((_, _, n)) => *n += 1,
+                None => seen.push((want, got, 1)),
+            }
+        }
+        let key = |&(w, g, n): &(&str, &str, usize)| (usize::MAX - n, w.to_string(), g.to_string());
+        seen.sort_by_key(key);
+        let mut expected = ALLOWED.to_vec();
+        expected.sort_by_key(key);
+        assert_eq!(
+            seen, expected,
+            "\n化け方が変わった（全 {total} 通り）。左が実際、右が許しているもの"
         );
         eprintln!(
             "  ずらした言い方 {total} 通り: ぜんぶ誤爆 0 / 別の色 {}",
