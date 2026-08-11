@@ -46,22 +46,6 @@ macro_rules! colors {
     (@kanji) => { None };
     (@kanji $kanji:literal) => { Some($kanji) };
 
-    // `stem` の行が無ければ変種名を小文字にしたもの。今の12色はすべてその形
-    // なので、書くと同じ語を2回持つことになる。
-    //
-    // `macro_rules!` に大文字小文字の変換は無いため、`const fn` で回している。
-    // 長さを型に載せないと配列が作れないので `stringify!` の長さを渡す。
-    // これで `const S: &str = Color::Red.stem();` も通る。
-    (@stem $variant:ident) => {{
-        const N: usize = stringify!($variant).len();
-        static BYTES: [u8; N] = lower::<N>(stringify!($variant));
-        match std::str::from_utf8(&BYTES) {
-            Ok(s) => s,
-            Err(_) => panic!("変種名は ASCII のはず"),
-        }
-    }};
-    (@stem $variant:ident $stem:literal) => { $stem };
-
     ($(
         $(#[$meta:meta])*
         $variant:ident: {
@@ -69,7 +53,6 @@ macro_rules! colors {
             $(kanji: $kanji:literal,)?
             rgb: $rgb:expr,
             name: $name:literal,
-            $(stem: $stem:literal,)?
         },
     )*) => {
         /// 歌がクレヨンの歌なので、標準的なクレヨン12色セット
@@ -111,11 +94,21 @@ macro_rules! colors {
                 match self { $(Color::$variant => $name,)* }
             }
 
-            /// 音源のファイル名。`assets/<stem>.wav`。
+            /// 音源のファイル名。`assets/<stem>.wav`。変種名の小文字。
             ///
-            /// 既定は変種名の小文字。合わない色が出たら `stem:` で上書きする。
+            /// `macro_rules!` に大文字小文字の変換は無いので `const fn` で回す。
+            /// 長さを型に載せないと配列が作れないため `stringify!` の長さを渡す。
             pub const fn stem(&self) -> &'static str {
-                match self { $(Color::$variant => colors!(@stem $variant $($stem)?),)* }
+                match self {
+                    $(Color::$variant => {
+                        const N: usize = stringify!($variant).len();
+                        static BYTES: [u8; N] = lower::<N>(stringify!($variant));
+                        match std::str::from_utf8(&BYTES) {
+                            Ok(s) => s,
+                            Err(_) => panic!("変種名は ASCII のはず"),
+                        }
+                    })*
+                }
             }
         }
     };
@@ -205,9 +198,6 @@ impl Color {
     ///
     /// `COUNT` と `VARIANTS` は同じ derive から出るので長さは必ず一致し、
     /// 添字が外れることはない。
-    ///
-    /// `std::array::from_fn` は const ではないので手で回している。const に
-    /// しておくと定数として畳めて、`const` の初期値にも書ける。
     pub const fn all() -> [Color; Self::COUNT] {
         let mut out = [Color::VARIANTS[0]; Self::COUNT];
         let mut i = 1;
