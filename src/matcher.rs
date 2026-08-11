@@ -19,22 +19,10 @@
 //!
 //! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
-use crate::color::Color;
+use sort_const::const_quicksort;
 
-/// 子どもの応答。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Answer {
-    /// 色を答えた。ループを続ける。
-    Color(Color),
-    /// 「ぜんぶ！」と答えた。転調してエンディングへ向かう。
-    All,
-}
-
-/// 「ぜんぶ」の読み。ここにマッチしたらゲーム終了。
-pub const ALL_READING: &str = "ぜんぶ";
-/// 同じものの漢字表記。`initial_prompt` は誘導であって強制ではないので、
-/// whisper は漢字を返すことがある。実際に「全部」が出た。
-const ALL_KANJI: &str = "全部";
+use crate::color::Answer;
+use const_for::const_for;
 
 /// 質問の歌がマイクに回り込んだぶんを落とす。
 ///
@@ -53,8 +41,8 @@ const PROMPT: &[&str] = &["どんないろがすき", "どんないろ", "どん
 fn allowed(answer: Answer, reading_len: usize) -> usize {
     match answer {
         Answer::All => 4,
-        Answer::Color(_) if reading_len <= 2 => 4,
-        Answer::Color(_) => 6,
+        Answer::Single(_) if reading_len <= 2 => 4,
+        Answer::Single(_) => 6,
     }
 }
 
@@ -77,10 +65,92 @@ fn skeleton(s: &str) -> Vec<char> {
         .collect()
 }
 
+/// 漢字表記を持つ応答の数。候補の丈を出すためだけに数える。
+const fn kanji_count() -> usize {
+    let every = Answer::every();
+    let mut n = 0;
+    const_for!(i in 0..Answer::COUNT => {
+        if every[i].kanji().is_some() {
+            n += 1;
+        }
+    });
+    n
+}
+
+/// UTF-8 の文字数。`str::chars` は const で回せないので先頭バイトを数える。
+const fn char_count(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut n = 0;
+    const_for!(i in 0..bytes.len() => {
+        // 継続バイト（10xxxxxx）以外が1文字の先頭。
+        if bytes[i] & 0xC0 != 0x80 {
+            n += 1;
+        }
+    });
+    n
+}
+
+/// 候補の数。読みが全応答ぶん、漢字はある応答のぶんだけ。
+const CANDIDATE_COUNT: usize = Answer::COUNT + kanji_count();
+
+/// 候補の並び順。**同点が出ないところまで見る。**
+///
+/// 長さの降順が主。短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
+/// あるので、部分一致は長いほうから試さないと取りこぼす。
+///
+/// 同じ長さなら元の位置の昇順。作る順は「読みを全部 → 漢字を全部」で、
+/// どちらも `Answer::every()` の順なので、これで「読みが漢字より先」と
+/// 「先に宣言した色が先」の両方が決まる。
+///
+/// **ここまで見れば同点が無い。** 並べ替えが安定かどうかに結果が依らない
+/// ので、不安定なアルゴリズムを使ってもよい。
+const fn before(a: (Answer, &str, usize), b: (Answer, &str, usize)) -> bool {
+    let (la, lb) = (char_count(a.1), char_count(b.1));
+    if la != lb {
+        la > lb
+    } else {
+        a.2 < b.2
+    }
+}
+
+/// 判定の候補。
+///
+/// **`normalize` は通さない。** 語彙の側が正規形で書かれている約束
+/// （`color.rs` を見ること）なので、通しても何も起きない。破れていない
+/// ことは `vocabulary_is_already_normalized` で見ている。
+const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
+    let every = Answer::every();
+
+    // 3つ目は作った順。並べ替えの second key に使う。
+    let mut buf = [(Answer::All, "", 0usize); CANDIDATE_COUNT];
+    let mut n = 0;
+    const_for!(i in 0..Answer::COUNT => {
+        buf[n] = (every[i], every[i].reading(), n);
+        n += 1;
+    });
+    const_for!(i in 0..Answer::COUNT => {
+        if let Some(k) = every[i].kanji() {
+            buf[n] = (every[i], k, n);
+            n += 1;
+        }
+    });
+
+    // 配列を渡すと**その場では並べ替えず、並べ替えたものを返す**。
+    // 戻り値を捨てると黙って未整列のまま進むので、必ず受け直すこと。
+    let buf = const_quicksort!(buf, |a, b| before(*a, *b));
+
+    // 並べ終わったら位置は要らない。
+    let mut out = [(Answer::All, ""); CANDIDATE_COUNT];
+    const_for!(i in 0..CANDIDATE_COUNT => {
+        out[i] = (buf[i].0, buf[i].1);
+    });
+    out
+};
+
 pub struct Matcher {
-    /// 正規化済みの (応答, 読み)。長い読みから順に並べてある。
-    candidates: Vec<(Answer, String)>,
-    /// 同じものの骨格。編集距離用。
+    /// 候補の骨格。編集距離用。並びは `CANDIDATES` と同じ。
+    ///
+    /// `skeleton` が `Vec<char>` を返すので、ここだけは実行時に作る。
     skeletons: Vec<(Answer, Vec<char>)>,
     /// 先頭から信用する区間の数。tiny は言っていない語を後ろに継ぎ足す。
     head: usize,
@@ -88,24 +158,8 @@ pub struct Matcher {
 
 impl Matcher {
     pub fn new(head: usize) -> Self {
-        let mut candidates: Vec<(Answer, String)> = Vec::new();
-        for c in Color::ALL {
-            candidates.push((Answer::Color(c), normalize(c.reading())));
-        }
-        candidates.push((Answer::All, normalize(ALL_READING)));
-        candidates.push((Answer::All, normalize(ALL_KANJI)));
-        for c in Color::ALL {
-            if let Some(k) = c.kanji() {
-                candidates.push((Answer::Color(c), normalize(k)));
-            }
-        }
-        // 短い色名が長い色名に含まれる組（「きみどり」⊃「みどり」）が
-        // あるので、部分一致は長い読みから試さないと取りこぼす。
-        candidates.sort_by_key(|(_, r)| std::cmp::Reverse(r.chars().count()));
-        let skeletons = candidates.iter().map(|(a, r)| (*a, skeleton(r))).collect();
         Self {
-            candidates,
-            skeletons,
+            skeletons: CANDIDATES.iter().map(|(a, r)| (*a, skeleton(r))).collect(),
             head: head.max(1),
         }
     }
@@ -133,16 +187,13 @@ impl Matcher {
     }
 
     fn exact(&self, text: &str) -> Option<Answer> {
-        self.candidates
-            .iter()
-            .find(|(_, r)| r == text)
-            .map(|(a, _)| *a)
+        CANDIDATES.iter().find(|(_, r)| *r == text).map(|(a, _)| *a)
     }
 
     fn substring(&self, text: &str) -> Option<Answer> {
-        self.candidates
+        CANDIDATES
             .iter()
-            .find(|(_, r)| text.contains(r.as_str()))
+            .find(|(_, r)| text.contains(*r))
             .map(|(a, _)| *a)
     }
 
@@ -216,8 +267,9 @@ fn is_separator(c: char) -> bool {
 
 /// カタカナをひらがなに寄せ、空白を落とす。
 ///
-/// 認識結果と読みの両方を通すので、読みの側にカタカナ表記を並べる
-/// 必要がない。長音符「ー」はカタカナ領域の外なのでそのまま残る。
+/// **通すのは認識結果だけ。** 語彙の側は初めから正規形で書く約束なので、
+/// カタカナ表記を並べる必要も、ここを通す必要もない。
+/// 長音符「ー」はカタカナ領域の外なのでそのまま残る。
 /// 句読点は落とさない。`segments` が区切りとして使う。
 fn normalize(s: &str) -> String {
     s.chars()
@@ -365,13 +417,68 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use crate::color::Color;
+
     use super::*;
 
     fn find(s: &str) -> Option<Answer> {
         Matcher::new(2).find(s)
     }
     fn c(x: Color) -> Option<Answer> {
-        Some(Answer::Color(x))
+        Some(Answer::Single(x))
+    }
+
+    /// 候補を `normalize` に通していないので、**語彙の側が正規形である
+    /// ことが前提**になる。カタカナや空白が紛れ込むと、判定が黙って
+    /// 当たらなくなる。制約が破れたらここで気づく。
+    #[test]
+    fn vocabulary_is_already_normalized() {
+        for a in Answer::every() {
+            assert_eq!(normalize(a.reading()), a.reading(), "読みが正規形でない");
+            if let Some(k) = a.kanji() {
+                assert_eq!(normalize(k), k, "漢字表記が正規形でない");
+            }
+        }
+    }
+
+    /// 部分一致は長いほうから試す。並びが崩れると「きみどりがすき」が
+    /// 「みどり」に化ける。const で組んであるので、崩れたらここで気づく。
+    #[test]
+    fn candidates_are_sorted_longest_first() {
+        let lens: Vec<usize> = CANDIDATES.iter().map(|(_, r)| r.chars().count()).collect();
+        assert!(
+            lens.windows(2).all(|w| w[0] >= w[1]),
+            "長い順でない: {lens:?}"
+        );
+
+        // 同じ長さなら読みが先。`after` が元の位置まで見るので、並べ替えの
+        // 安定性に関係なくこの順になる。ここで見ているのは「意図した順に
+        // なっているか」であって、アルゴリズムの性質ではない。
+        //
+        // 崩れると「あかあお」のように繋がって認識されたとき、部分一致が
+        // どちらを採るかが変わる。
+        let is_kanji = |(a, r): &(Answer, &str)| a.kanji() == Some(*r);
+        for w in CANDIDATES.windows(2) {
+            if w[0].1.chars().count() == w[1].1.chars().count() && is_kanji(&w[0]) {
+                assert!(is_kanji(&w[1]), "同じ長さで漢字のあとに読みが来た");
+            }
+        }
+
+        // 同じ長さの読みどうしは宣言順。先に宣言した色が先に当たる。
+        let two: Vec<&str> = CANDIDATES
+            .iter()
+            .filter(|c| c.1.chars().count() == 2 && !is_kanji(c))
+            .map(|c| c.1)
+            .collect();
+        assert_eq!(two, ["あか", "あお", "しろ", "くろ"], "宣言順が崩れた");
+
+        // const で数えた丈が、実際に数えたものと合っているか。
+        let kanji = Answer::every()
+            .iter()
+            .filter(|a| a.kanji().is_some())
+            .count();
+        assert_eq!(CANDIDATES.len(), Answer::COUNT + kanji);
+        assert_eq!(char_count("きみどり"), "きみどり".chars().count());
     }
 
     #[test]

@@ -41,6 +41,15 @@ coreml = ["whisper-rs?/coreml"]
 anyhow = "1"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
+# Color::COUNT を数える（EnumCount）。手で持つと色を足したときに
+# 更新し忘れるので、変種の数は derive に任せる。
+strum = { version = "0.28", features = ["derive"] }
+# 判定候補の並べ替えを const で行う。宣言マクロだけで proc-macro を
+# 使わないので、ビルドは重くならない。
+sort-const = "1.0"
+# const fn の中で for を回す。Iterator::next が const でないため素では
+# 書けない。break / continue も正しく扱う。依存はゼロ。
+const_for = "0.1"
 
 # 録音 / 再生。どちらもクロスプラットフォームで、macOS では CoreAudio、
 # Raspberry Pi では ALSA を使う。ソースは共通のままでよい。

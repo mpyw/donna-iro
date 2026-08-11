@@ -26,14 +26,15 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use strum::EnumCount;
 
 use crate::audio::Player;
-use crate::color::Color;
+use crate::color::{Answer, Color};
 use crate::config::Config;
 use crate::control::Control;
 use crate::cue::Cue;
 use crate::listener::Listener;
-use crate::matcher::{Answer, Matcher};
+use crate::matcher::Matcher;
 use crate::screen::{Frame, Screen};
 
 pub struct Game {
@@ -114,7 +115,7 @@ impl Game {
             // 聞き取れなければランダムな色。黙ってはいけない。
             // ここで All に倒してはならない。事故で終わってしまう。
             let color = match answer {
-                Some(Answer::Color(c)) => c,
+                Some(Answer::Single(c)) => c,
                 _ => Color::random(),
             };
             self.screen.show(Frame::Single(color));
@@ -184,6 +185,8 @@ fn shuffle(prev: &[Color; Color::COUNT]) -> [Color; Color::COUNT] {
 
 #[cfg(test)]
 mod tests {
+    use strum::VariantArray;
+
     use super::*;
 
     #[test]
@@ -194,9 +197,9 @@ mod tests {
             // 全色が1つずつ残っている
             let mut a = next;
             a.sort_by_key(|c| c.stem());
-            let mut b = Color::ALL;
+            let mut b = Color::VARIANTS.to_vec();
             b.sort_by_key(|c| c.stem());
-            assert_eq!(a, b, "色が増減している");
+            assert_eq!(a.as_slice(), b, "色が増減している");
             // どの位置も色が変わっている
             assert!(
                 next.iter().zip(order.iter()).all(|(x, y)| x != y),

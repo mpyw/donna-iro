@@ -225,7 +225,6 @@ flowchart TD
     game --> cue
 
     listener --> audio
-    listener --> matcher
     audio --> cue
     window --> screen
 
@@ -257,7 +256,7 @@ flowchart TD
 | --- | --- |
 | `main.rs` | `game` `window` `listener` `audio` `control` `screen` `config` |
 | `game.rs` | `listener` `audio` `matcher` `control` `screen` `cue` `color` `config` |
-| `listener.rs` | `audio` `matcher` `color` `config` |
+| `listener.rs` | `audio` `color` `config` |
 | `audio.rs` | `cue` `config` |
 | `window.rs` | `screen` `color` |
 | `cue.rs` `matcher.rs` `screen.rs` | `color` |

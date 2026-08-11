@@ -3,6 +3,8 @@
 //! 本命はウィンドウ（`window.rs`）。テレビに映して2歳児に見せるものなので、
 //! ターミナルは動作確認用に色名を出すだけに留める。
 
+use strum::{EnumCount, VariantArray};
+
 use crate::color::{Color, Rgb};
 
 /// 今なにを映すか。
@@ -11,7 +13,7 @@ pub enum Frame {
     /// 全色を並べる。質問・区切りのとき。
     ///
     /// 並び順を持つのは、フィナーレで位置ごとに色を入れ替えるため。
-    /// 通常は `Color::ALL` の順。
+    /// 通常は宣言順（`Color::VARIANTS`）。
     Palette([Color; Color::COUNT]),
     /// 1色だけ大きく。その色のフレーズを歌っている間。
     Single(Color),
@@ -25,7 +27,7 @@ pub enum Frame {
 
 impl Frame {
     /// 既定の並びの全色。
-    pub fn palette() -> Frame {
+    pub const fn palette() -> Frame {
         Frame::Palette(Color::ALL)
     }
 }
@@ -58,7 +60,9 @@ pub struct Terminal;
 impl Screen for Terminal {
     fn show(&mut self, frame: Frame) {
         match frame {
-            Frame::Palette(order) if order == Color::ALL => println!("── ぜんぶ ──"),
+            Frame::Palette(order) if order.as_slice() == Color::VARIANTS => {
+                println!("── ぜんぶ ──")
+            }
             Frame::Palette(order) => {
                 let names: Vec<&str> = order.iter().map(|c| c.name()).collect();
                 println!("── {} ──", names.join(" "));
