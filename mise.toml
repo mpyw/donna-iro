@@ -1,0 +1,32 @@
+# cargo が暗黙に叩く道具を、ここで釘で留める。
+#
+#   mise install
+#
+# **実際に cmake を消したらビルドが落ちた。** whisper-rs-sys の build.rs が
+# cmake crate 経由で実体を叩くため。Homebrew 任せにしていると、別の用事で
+# 入れ替えた拍子に静かに壊れる。
+#
+# **ここに書けるのは道具の一部でしかない。** libclang（bindgen）と、ラズパイの
+# ALSA ヘッダは OS の側から来るので、mise では宣言できない。揃っているかは
+# tools/check.sh の冒頭で見る。足りなければそこで名前が出る。
+# **この一覧が全部だと思って読まないこと。**
+
+[tools]
+# whisper.cpp のビルド。**無いと whisper feature が落ちる。**
+# 上限を切ってあるのは、cmake 5 が来ると whisper.cpp 側の
+# cmake_minimum_required で死ぬため。上げるときは実際に組んでから。
+cmake = "4"
+
+# assets/ は private サブモジュール + LFS。無いと音源がポインタのまま
+# 落ちてきて、埋め込みビルドが読めないエラーになる。
+git-lfs = "3"
+
+# --- ここに置かないもの ---
+#
+# rust: tools/check.sh が nightly rustfmt を
+#   `rustup which --toolchain nightly` で探すので、rustup を横取りさせない。
+#   外れても検査は**緑のまま通る**（安定版に黙って落ちる）ので、たちが悪い。
+#
+# python: tools/*.py が本当に要るのは numpy のほうで、そちらは mise の
+#   管轄外。python だけ固定すると numpy の入った venv を隠して、今動いて
+#   いるものを壊すだけになる。

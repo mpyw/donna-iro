@@ -15,6 +15,59 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# 先に道具を確かめる。
+#
+# **mise.toml に書けるのは cmake と git-lfs だけ。** libclang（bindgen が
+# dlopen する）と、ラズパイの ALSA ヘッダは OS の側から来るので、mise を
+# 入れても宣言しきれない。欠けたまま回すと whisper.cpp のビルドが読めない
+# エラーで落ちて、原因が道具だと分からない。ここで名前を出して止める。
+missing=""
+add_missing() {
+  missing="$missing  - $1
+"
+}
+
+command -v cmake >/dev/null 2>&1 ||
+  add_missing "cmake（whisper.cpp のビルド / mise install）"
+
+case "$(uname -s)" in
+Darwin)
+  # bindgen が libclang.dylib を開く。Xcode CLT か Xcode から来る。
+  dev="$(xcode-select -p 2>/dev/null)"
+  found=""
+  if [ -n "$dev" ]; then
+    for c in "$dev"/usr/lib/libclang.dylib \
+      "$dev"/Toolchains/*/usr/lib/libclang.dylib; do
+      if [ -f "$c" ]; then
+        found=1
+        break
+      fi
+    done
+  fi
+  [ -n "${LIBCLANG_PATH:-}" ] || [ -n "$found" ] ||
+    add_missing "libclang（bindgen が使う / xcode-select --install）"
+  ;;
+Linux)
+  # alsa-sys が pkg-config で探す。cpal はどの feature でも入るので、
+  # これが無いと機能を全部落としてもビルドできない。
+  pkg-config --exists alsa 2>/dev/null ||
+    add_missing "libasound2-dev と pkg-config（cpal / sudo apt install libasound2-dev pkg-config）"
+  ;;
+esac
+
+if [ -n "$missing" ]; then
+  echo "道具が足りない:" >&2
+  printf '%s' "$missing" >&2
+  exit 1
+fi
+
+# git-lfs が無くても検査は回る。ただし音源が実体で落ちてこないので
+# 「埋め込み（本番）」が黙って飛ぶ。**飛んだことは言う。**
+if ! git lfs version >/dev/null 2>&1; then
+  echo "⚠ git-lfs が無い。assets/ の音源が実体にならないので、" >&2
+  echo "  「埋め込み（本番）」は検査されない（mise install）。" >&2
+fi
+
 # clippy で見る。check のスーパーセットなので、これ1本でよい。
 #
 # 検査する組み合わせ。名前 : 引数 : 警告を落とすか。
