@@ -26,6 +26,7 @@ intro
 ```sh
 git clone --recursive git@github.com:mpyw/donna-iro.git
 cd donna-iro
+mise install                # cmake と git-lfs（mise.toml）
 git -C assets lfs pull      # 音源を取る
 tools/fetch-model.sh        # whisper のモデルを取る（base・141MB）
 cargo build --release
@@ -34,6 +35,12 @@ cargo build --release
 ```sh
 ./target/release/donna-iro
 ```
+
+`cargo` が暗黙に叩く道具のうち、**`mise.toml` に載るのは cmake と git-lfs
+だけ。** whisper.cpp のビルドには libclang（`bindgen` が使う）も要り、
+ラズパイでは ALSA の開発ヘッダも要るが、どちらも OS の側から来るので mise
+では宣言できない。**足りないものは `tools/check.sh` が冒頭で名前を出して
+止める。** `mise.toml` を依存の全部だと思って読まないこと。
 
 つくよみちゃんの音源が `assets/` に揃うまでは、確認用の合成音
 （`assets/reference/`）に自動で落ちる。音源を置いた時点で、何もしなくても
