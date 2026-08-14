@@ -106,7 +106,17 @@ impl Game {
             self.player.play_until_quiet(Cue::Question)?;
 
             let answer = match self.listener.hear(self.listen_max)? {
-                Heard::Said(text) => self.matcher.find(&text),
+                Heard::Said(text) => {
+                    // **判定を出すのはここだけ。** `Matcher` の中で書くと、
+                    // 変異を掛けるテストが数千行のログを吐く。落選まで
+                    // 出しておかないと、外したときに手掛かりが残らない。
+                    //
+                    // stderr へ直に書く。装置でもファイルでもないので、
+                    // `app` の縛り（`app.rs` を見ること）には触れない。
+                    let verdict = self.matcher.find(&text);
+                    eprintln!("  {verdict}");
+                    verdict.answer
+                }
                 Heard::Nothing => None,
                 Heard::Closed => return Ok(false),
             };
