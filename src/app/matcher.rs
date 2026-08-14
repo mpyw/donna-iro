@@ -26,6 +26,8 @@
 //!
 //! どれも該当しなければ `None`。呼び出し側でランダムな色に倒す。
 
+use std::fmt;
+
 use const_for::const_for;
 use sort_const::const_quicksort;
 
@@ -148,6 +150,96 @@ const CANDIDATES: [(Answer, &str); CANDIDATE_COUNT] = {
     out
 };
 
+/// ログに出す近さの丈。**上位いくつまで見せるか。**
+///
+/// 全部（読みのぶんだけあるので十数件）出すと、1回の応答でログが埋まって
+/// 前後の行が流れる。惜しかったものは上のほうに固まるので、5件で足りる。
+const TOP: usize = 5;
+
+/// 判定の結果と、そこに至るまでに測った音の近さ。
+///
+/// **落選したものまで持って上がる。** 結果だけをログに出しても、選ばれた
+/// 色の隣に何がいたのかが分からない。実機で外したときに知りたいのは
+/// 「どれが惜しかったか」と「なぜそれが落ちたか」のほうで、そこが残らないと
+/// しきい値をどちらへ動かせばいいのか決められない。
+///
+/// **出す・出さないは呼び出し側の仕事。** `find` の中で書くと、変異を
+/// 掛けるテストが数千行のログを吐く。`Display` が体裁だけ持つ。
+pub struct Verdict {
+    /// 判定できた応答。`None` なら呼び出し側でランダムな色に倒す。
+    pub answer: Option<Answer>,
+    /// 測った順の近さ。位置ごとに、単独と結合で別々に増える。
+    ///
+    /// **空もありうる。** 完全一致や部分一致（段の1〜4）で決まったときは、
+    /// 音の近さを測るところまで行っていない。
+    rankings: Vec<Ranking>,
+}
+
+/// ある文字列に対して、候補を近い順に並べたもの。
+struct Ranking {
+    /// 測った文字列。区間そのものか、次の区間と繋げたもの。
+    text: String,
+    /// 近い順。**許容を超えたものも捨てずに入れる。** そこが落選の記録。
+    scores: Vec<Score>,
+    /// この文字列で採れたもの。`None` なら同点か、どれも遠かった。
+    taken: Option<Answer>,
+}
+
+struct Score {
+    answer: Answer,
+    distance: usize,
+    /// 許容する距離に収まっていたか。超えたものは判定に上がらない。
+    within: bool,
+}
+
+/// ログ1件ぶん。1行目が結果、続く行が測った近さ。
+impl fmt::Display for Verdict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.answer {
+            Some(a) => write!(f, "判定 {}", a.reading())?,
+            None => write!(f, "判定 なし")?,
+        }
+        if self.rankings.is_empty() {
+            // **無いことの理由まで書く。** 黙って行が減ると「測ったのに
+            // 全部落ちた」と読めてしまう。測り損ねたのではなく、測る前に
+            // 決まっている。
+            return write!(f, "（音の近さは測っていない）");
+        }
+        for r in &self.rankings {
+            write!(f, "\n    {r}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for Ranking {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "近さ「{}」", self.text)?;
+        for (n, s) in self.scores.iter().take(TOP).enumerate() {
+            // 許容を超えたものには印を付ける。**許容は候補の丈で変わるので、
+            // 同じ距離でも印が付くものと付かないものがある。** 数字だけ
+            // 並べると、そこがどうしても読めない。
+            let mark = if s.within { "" } else { "✗" };
+            let sep = if n == 0 { "" } else { " /" };
+            write!(f, "{sep} {mark}{} {}", s.answer.reading(), s.distance)?;
+        }
+        if self.scores.len() > TOP {
+            write!(f, " / …")?;
+        }
+        // **脱落の理由は表から読み取らせない。** 「同点だから諦めた」と
+        // 「どれも遠かった」は、直し方が逆方向になる。
+        if self.taken.is_none() {
+            let why = if self.scores.iter().any(|s| s.within) {
+                "同点で諦めた"
+            } else {
+                "どれも遠い"
+            };
+            write!(f, "（{why}）")?;
+        }
+        Ok(())
+    }
+}
+
 pub struct Matcher {
     /// 候補の骨格。編集距離用。並びは `CANDIDATES` と同じ。
     ///
@@ -173,11 +265,15 @@ impl Matcher {
         }
     }
 
-    pub fn find(&self, raw: &str) -> Option<Answer> {
+    pub fn find(&self, raw: &str) -> Verdict {
         let parts = assemble(raw, self.head);
+        // 測った近さの記録。**判定を変えないこと。** ここに溜めるのは
+        // `nearest` が実際に測ったものだけで、ログのために測り直さない。
+        // 測り直すと、ログと判定が別々の道を歩いて食い違う。
+        let mut log: Vec<Ranking> = Vec::new();
 
         // 段の順は冒頭に書いてある。要点は3〜5の位置。
-        (0..parts.len()).find_map(|i| {
+        let answer = (0..parts.len()).find_map(|i| {
             let single = parts[i].as_str();
             let joined = (parts.len() - i >= 2).then(|| parts[i..i + 2].concat());
             let joined = joined.as_deref();
@@ -200,7 +296,7 @@ impl Matcher {
             }
 
             // ここから先は音の近さ。**単独が土俵に乗っているかで分かれる。**
-            match self.nearest(single) {
+            match self.nearest(single, &mut log) {
                 // 乗っている。結合と突き合わせて近いほうを採る。**距離その
                 // ものが確からしさ**なので、順番で決めるところではない。
                 // 割れて一音ずれた語は結合が近く、幻覚の継ぎ足しは単独が
@@ -208,7 +304,7 @@ impl Matcher {
                 //
                 // 同点なら単独（位置優先に揃える）。ここで結合の部分一致に
                 // 譲らないのも要点で、譲ると継ぎ足しを拾ってしまう。
-                Some((sa, sd)) => Some(match joined.and_then(|j| self.nearest(j)) {
+                Some((sa, sd)) => Some(match joined.and_then(|j| self.nearest(j, &mut log)) {
                     Some((ja, jd)) if jd < sd => ja,
                     _ => sa,
                 }),
@@ -226,14 +322,19 @@ impl Matcher {
                         //
                         // 譲るのは負けたときだけ。同点で譲ると、同じ発話が
                         // 区間の割れ方だけで別の色になる。
-                        let (a, d) = joined.and_then(|j| self.nearest(j))?;
-                        match parts.get(i + 1).and_then(|n| self.nearest(n)) {
+                        let (a, d) = joined.and_then(|j| self.nearest(j, &mut log))?;
+                        match parts.get(i + 1).and_then(|n| self.nearest(n, &mut log)) {
                             Some((_, next_d)) if next_d < d => None,
                             _ => Some(a),
                         }
                     }),
             }
-        })
+        });
+
+        Verdict {
+            answer,
+            rankings: log,
+        }
     }
 
     fn exact(&self, text: &str) -> Option<Answer> {
@@ -251,7 +352,11 @@ impl Matcher {
             .map(|(_, a)| a)
     }
 
-    fn nearest(&self, text: &str) -> Option<(Answer, usize)> {
+    /// 音の近さで一番のものを返す。**測ったものは `log` に置いていく。**
+    ///
+    /// 落選まで残すのがログの用なので、記録は判定の副産物にしてある。
+    /// 呼ばれた回数ぶん増えるので、単独と結合が別の行として並ぶ。
+    fn nearest(&self, text: &str, log: &mut Vec<Ranking>) -> Option<(Answer, usize)> {
         // 許容する編集距離。単位は `substitution` の重みで、4 が1音ぶん。
         //
         // **2文字の読みは半音まで。** 2音のうち1音が別物なら「近い」のでは
@@ -285,10 +390,13 @@ impl Matcher {
         // 1文字が当たったとしてもそれは「近い」のではなく「短すぎて何にでも
         // 近い」。「えー」が「あお」に化けて、位置優先で後ろの本当の答えを
         // 押し出していた。
+        //
+        // **ログにも出さない。** 測っていないものを空の表として出すと、
+        // 「候補が全部落ちた」と見分けが付かない。
         if chars.len() < 2 {
             return None;
         }
-        let mut scores: Vec<(Answer, usize)> = Vec::new();
+        let mut scores: Vec<Score> = Vec::new();
         for (a, r) in self.skeletons.iter() {
             let d = levenshtein(&chars, r);
             // **短いほうで測る。** 入力が2音しかないのに3音の読みへ
@@ -305,20 +413,39 @@ impl Matcher {
             } else {
                 r.len().min(chars.len())
             };
-            if d > allowed(len) {
-                continue;
-            }
-            scores.push((*a, d));
+            // **許容を超えたものも表に残す。** 判定からは外れるが、
+            // 「あと1つで届いていた」はログで一番知りたいところ。
+            // 落とすのは判定に上げるときだけ。
+            scores.push(Score {
+                answer: *a,
+                distance: d,
+                within: d <= allowed(len),
+            });
         }
-        scores.sort_by_key(|&(_, d)| d);
+        scores.sort_by_key(|s| s.distance);
 
-        let (best, best_d) = *scores.first()?;
-        // 同点なら諦める。「あか」と「あお」、「しろ」と「くろ」のように
-        // 1文字違いの色があるので、割れたまま採用すると取り違える。
-        if scores.get(1).is_some_and(|&(_, d)| d == best_d) {
-            return None;
+        // 判定に上がるのは許容内のものだけ。並べ替えは安定なので、
+        // 絞ってから並べたときと先頭は同じになる。
+        let mut within = scores.iter().filter(|s| s.within);
+        let taken = match (within.next(), within.next()) {
+            // 同点なら諦める。「あか」と「あお」、「しろ」と「くろ」のように
+            // 1文字違いの色があるので、割れたまま採用すると取り違える。
+            (Some(best), Some(next)) if next.distance == best.distance => None,
+            (Some(best), _) => Some((best.answer, best.distance)),
+            (None, _) => None,
+        };
+
+        // **同じ文字列は1度しか載せない。** 位置ごとに単独と結合を測るので、
+        // 同じものを二度測ることがある（結合の近さと、次の区間との見比べ）。
+        // 距離は文字列だけで決まるので、二度目は一字一句同じ行になる。
+        if !log.iter().any(|r| r.text == text) {
+            log.push(Ranking {
+                text: text.to_string(),
+                scores,
+                taken: taken.map(|(a, _)| a),
+            });
         }
-        Some((best, best_d))
+        taken
     }
 }
 
@@ -729,7 +856,7 @@ mod tests {
     use crate::app::Color;
 
     pub fn find(s: &str) -> Option<Answer> {
-        Matcher::new(2).find(s)
+        Matcher::new(2).find(s).answer
     }
     fn c(x: Color) -> Option<Answer> {
         Some(Answer::Single(x))
@@ -1412,7 +1539,7 @@ mod tests {
                         // **「ぜんぶ」も1組として数える。** 以前はここだけ
                         // 別枠で落としていた。取り違えは取り違えで、遊びが
                         // 終わっても「もう1回」を押せばいいだけ。
-                        match m.find(&input) {
+                        match m.find(&input).answer {
                             Some(got) if got != Answer::Single(*color) => {
                                 wrong.push((color.reading(), got.reading()))
                             }
@@ -1460,6 +1587,43 @@ mod tests {
             "\n化け方が変わった（全 {total} 通り）。左が実際、右が許しているもの"
         );
         eprintln!("  ずらした言い方 {total} 通り: 別の色 {}", wrong.len());
+    }
+
+    /// ログに**落選まで出ること。**
+    ///
+    /// 判定した色だけ出していた頃は、外れたときに何も分からなかった。
+    /// 隣に何がいて、どれが許容の外で、なぜ諦めたのか。締めるべきか
+    /// 緩めるべきかはそこを見ないと決められないので、体裁ごと固定する。
+    ///
+    /// **距離の重みをいじるとここも動く。** 数字が変わっただけなら、
+    /// 期待値を書き換えてよい。消えてはいけないのは行そのものと印。
+    #[test]
+    fn the_log_shows_what_lost() {
+        let m = Matcher::new(2);
+        let log = |s: &str| m.find(s).to_string();
+
+        // 選ばれた色の隣に誰がいたか。上位5件で、6件目以降は「…」に畳む。
+        // 「みじろ」は みずいろ と きいろ が競る形（表にもある実例）。
+        assert_eq!(
+            log("みじろ"),
+            "判定 みずいろ\n    近さ「みじろ」 みずいろ 4 / ちゃいろ 5 / きいろ 5 / みどり 5 / ✗しろ 5 / …"
+        );
+
+        // **諦めた理由は書き分ける。** 同点なら緩めても直らない。
+        assert!(log("きーろ").contains("同点で諦めた"), "{}", log("きーろ"));
+        assert!(
+            log("おかあさん").contains("どれも遠い"),
+            "{}",
+            log("おかあさん")
+        );
+
+        // 完全一致は音の近さを測らない。**行が無いことを「全部落ちた」と
+        // 読み違えないように、測っていないと書く。**
+        assert_eq!(log("あか"), "判定 あか（音の近さは測っていない）");
+        assert_eq!(log("どんな いろ"), "判定 なし（音の近さは測っていない）");
+
+        // 同じ文字列を二度測っても行は増えない。
+        assert_eq!(log("えー ちろ").matches("近さ「ちろ」").count(), 1);
     }
 
     #[test]
