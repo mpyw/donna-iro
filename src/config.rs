@@ -64,6 +64,8 @@ pub struct Listen {
     hangover_ms: u64,
     /// 窓を開けた直後、スピーカーの残響を無視する時間（ミリ秒）。
     guard_ms: u64,
+    /// 窓を開ける前のぶんを、どれだけ遡って残すか（ミリ秒）。
+    preroll_ms: u64,
     /// これだけ続けて初めて「聞こえた」とみなす（ミリ秒）。
     min_speech_ms: u64,
     /// 環境ノイズの何倍を発話とみなすか。
@@ -101,6 +103,7 @@ impl Default for Listen {
             max_seconds: 5.0,
             hangover_ms: 350,
             guard_ms: 200,
+            preroll_ms: 700,
             min_speech_ms: 75,
             speech_ratio: 2.0,
             speech_floor: 0.005,
@@ -142,6 +145,9 @@ impl Listen {
     }
     pub fn guard(&self) -> Duration {
         Duration::from_millis(self.guard_ms)
+    }
+    pub fn preroll(&self) -> Duration {
+        Duration::from_millis(self.preroll_ms)
     }
     pub fn min_speech(&self) -> Duration {
         Duration::from_millis(self.min_speech_ms)
@@ -242,6 +248,21 @@ impl Config {
             );
         }
 
+        // **遡れるのは、リングバッファに必ず残っているぶんまで。** 上限は
+        // `rate * (max_seconds + 2)` で、max_seconds の下限が 0.01 なので
+        // 2秒はどの設定でも残っている。
+        //
+        // 遡りすぎてもいけない。質問が丸ごと入ると、回り込みを落とす仕掛け
+        // （`matcher.rs` の QUESTION）に頼りきりになる。
+        const MAX_PREROLL_MS: u64 = 2000;
+        if self.listen.preroll_ms > MAX_PREROLL_MS {
+            anyhow::bail!(
+                "listen.preroll_ms は {MAX_PREROLL_MS}ms 以下であること（いまは {}ms）。\
+                 それより前は録音に残っていない",
+                self.listen.preroll_ms
+            );
+        }
+
         if self.listen.speech_floor > self.listen.speech_ceil {
             anyhow::bail!(
                 "listen.speech_floor は speech_ceil 以下であること（いまは {} > {}）",
@@ -337,6 +358,8 @@ mod tests {
         assert!(bad(|c| c.listen.hangover_ms = 9_000).contains("hangover_ms"));
         // clamp がパニックする。しかも聞き取りのたび
         assert!(bad(|c| c.listen.speech_floor = 0.9).contains("speech_ceil"));
+        // 録音に残っていないところまで遡っても、黙って短くなるだけ
+        assert!(bad(|c| c.listen.preroll_ms = 5_000).contains("preroll_ms"));
         // 割り算
         assert!(bad(|c| c.game.insert_every = 0).contains("insert_every"));
         // フィナーレが空回りする
