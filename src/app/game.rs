@@ -115,7 +115,10 @@ impl Game {
                     // `app` の縛り（`app.rs` を見ること）には触れない。
                     let verdict = self.matcher.find(&text);
                     eprintln!("  {verdict}");
-                    verdict.answer
+                    // **`None` は「測ってすらいない」だけ。** 遠かったものは
+                    // 判定の側で一番近いものへ倒してある。足切りして黙るより、
+                    // それっぽいものを鳴らすほうが当たる（`matcher.rs`）。
+                    verdict.answer()
                 }
                 Heard::Nothing => None,
                 Heard::Closed => return Ok(false),
@@ -126,8 +129,11 @@ impl Game {
                 return Ok(true);
             }
 
-            // 聞き取れなければランダムな色。黙ってはいけない。
-            // ここで All に倒してはならない。事故で終わってしまう。
+            // 何も聞こえなかったときだけランダムな色。黙ってはいけない。
+            // **声が届いていれば、遠くてもここには来ない**（判定が一番近い
+            // ものへ倒す）。ここに来るのは無言と、1音だけのときだけ。
+            //
+            // ここで All に倒してはならない。何も言っていないのに終わる。
             let color = match answer {
                 Some(Answer::Single(c)) => c,
                 _ => Color::random(),
@@ -338,6 +344,16 @@ mod tests {
         );
         // 事故で終わってはいけない。
         assert_ne!(cues[2], Cue::Finale);
+    }
+
+    /// 遠い声でも、**判定が倒した色がそのまま鳴ること。**
+    ///
+    /// 足切りしていた頃はここがランダムだったので、繋ぎ間違えても気づけない。
+    /// 「あたん」は実機のログで、子どもは「あか」と言っていた（`matcher.rs`）。
+    #[test]
+    fn a_distant_answer_plays_the_closest_color() {
+        let cues = played(vec![Some("あたん")], 0);
+        assert_eq!(cues[2], Cue::Color(Color::Red), "{cues:?}");
     }
 
     #[test]
