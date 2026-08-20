@@ -203,7 +203,26 @@ deploy_conf() {
 }
 
 echo "OS 側の設定（pi/）"
-deploy_conf pi/asoundrc .asoundrc
+# **/etc は sudo が要る。** このスクリプトは無人でも回るので、書き込みは
+# 試さずに「違う」ことだけ言って、打つべき一行を出す。パスワードを聞かれる
+# 経路をスクリプトの中に隠すと、CI や cron で黙って止まる。
+deploy_conf_etc_asound() {
+  local src="$ROOT/pi/asound.conf"
+  if ssh "$DEST" "[ -f /etc/asound.conf ]" &&
+    ssh "$DEST" "cat /etc/asound.conf" 2>/dev/null | diff -q - "$src" >/dev/null 2>&1; then
+    echo "  /etc/asound.conf は同じ"
+    return 0
+  fi
+  rsync -a "$src" "$DEST:/tmp/asound.conf"
+  echo "  ⚠ /etc/asound.conf が違う。/tmp/asound.conf に置いたので、これを打つこと:" >&2
+  echo "      ssh -t $DEST 'sudo install -m644 /tmp/asound.conf /etc/asound.conf && rm -f ~/.asoundrc'" >&2
+  # **~/.asoundrc が残っていると、そちらが勝つ。** 消し忘れに気づけない。
+  if ssh "$DEST" "[ -f ~/.asoundrc ]"; then
+    echo "      （~/.asoundrc がまだ在る。あるとそちらが優先される）" >&2
+  fi
+  return 0
+}
+deploy_conf_etc_asound
 # labwc は SIGHUP で読み直す。動いていなければ何も起きないだけ。
 deploy_conf pi/labwc-rc.xml .config/labwc/rc.xml "killall -HUP labwc"
 # kanshi にはこのビルドで reload が無いので、入れ直す。labwc の autostart が
