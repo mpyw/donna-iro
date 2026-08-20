@@ -50,6 +50,13 @@ pub fn run(rx: Receiver<Frame>, again: Sender<()>) -> Result<()> {
     )
     .context("ウィンドウを開けない")?;
     window.set_target_fps(FPS as usize);
+    // **矢印を消す。** テレビの前にマウスは無いので、置き場所によっては
+    // 画面の真ん中に矢印が居座る。色を見る邪魔になるし、2歳児には何なのか
+    // 分からない。
+    //
+    // クリックは消しても受けられる。「もう1回」はどこを押しても同じ合図が
+    // 飛ぶ仕様なので、狙うための矢印がそもそも要らない。
+    window.set_cursor_visibility(false);
 
     let mut buf = vec![0u32; WIDTH * HEIGHT];
     let mut frame = Frame::palette();

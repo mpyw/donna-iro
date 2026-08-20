@@ -89,6 +89,41 @@ Metal を有効にするので認識が CPU より速い。音源とモデルは
 
 `Info.plist` にマイクの用途を書いてあるので、初回に許可を聞かれる。
 
+### ラズパイに配る
+
+```sh
+tools/build-pi.sh          # 組むだけ → target/pi/donna-iro
+tools/build-pi.sh pi5      # 組んで ssh 先の ~/donna-iro へ配る
+```
+
+**sysroot を使うクロスコンパイルはしない。** macOS から
+`aarch64-unknown-linux-gnu` を直接狙うと、whisper.cpp（cmake + bindgen）と
+ALSA のために sysroot・クロス gcc/g++・libclang のターゲット指定が要る。
+代わりに **arm64 の Debian コンテナの中でネイティブに組む。** Apple Silicon
+なら linux/arm64 はエミュレーションなしで動くので、whisper.cpp 込みで1分を
+切る。イメージは Pi と同じ trixie に固定してある（**新しくすると glibc が
+前方互換でないので Pi 側で `GLIBC_2.xx not found` になる**）。Intel Mac では
+エミュレーションになって現実的な速さにならないので、そのときは Pi 側で
+`cargo build` するほうが早い。
+
+**Pi 側に rust も cmake も入れない。** 実行時に要るのは `libasound.so.2` と
+`libstdc++.so.6`、それに window を使うなら X11 と xkbcommon で、どれも
+Raspberry Pi OS のデスクトップ版に既に入っている。足りなければスクリプトが
+名前を出す。
+
+**埋め込み（`embed`）は使わない。** Pi ではバイナリの隣にファイルを置けるので、
+141MB のモデルを焼き込む理由が無い。差し替えも rsync だけで済む。埋め込みが
+要るのは CWD が `/` になる macOS の `.app` のほう。
+
+**音源とモデルは手元から送る。** `assets/` は private サブモジュールなので、
+Pi に鍵を置いて `known_hosts` を通すまで Pi 側では clone できない。
+`models/*.bin` は全部送るので、`tiny` に落として速さを比べるのもそのままできる。
+
+**OS 側の設定も一緒に配る**（`pi/`）。音量つまみと全画面のルールは
+バイナリに入れられないので外に出るしかない。**手で置くと Git の外に出て次に
+再現できない**ので repo で持つ。中身が違うものが既にあれば `*.bak` に退避
+してから置き、退避したことは必ず言う。詳しくは `pi/README.md`。
+
 ### ビルドの切り替え
 
 | フィーチャー | |
@@ -328,14 +363,70 @@ RUSTFMT="$(rustup which --toolchain nightly rustfmt)" cargo fmt
 `tools/check.sh` は nightly が入っていればそちらで見る。
 | `tools/fetch-model.sh` | whisper のモデルを取得 |
 | `tools/bundle-mac.sh` | macOS の `.app` を作る（Metal + 埋め込み） |
+| `tools/build-pi.sh` | ラズパイ向けに組んで配る（arm64 コンテナでネイティブに）|
 | `tools/split_score.py` | 元譜面から素材ごとの MusicXML を切り出す |
 | `tools/render_reference.py` | MusicXML から確認用の音源を書き出す |
+
+`pi/` はラズパイ側の OS 設定（`~/.asoundrc` と labwc の `rc.xml`）。
+**バイナリに入れられなかったものだけ**が入っている。`pi/README.md` を見ること。
 
 ## ハードウェア
 
 - Raspberry Pi 5（デスクトップ版 OS。コンソール起動だとウィンドウが開けない）
 - USB マイク（離れた場所から拾うなら ReSpeaker 等のマイクアレイ HAT）
 - HDMI でテレビ
+
+### テレビで全画面にする
+
+**minifb にフルスクリーンの API は無い**（`WindowOptions` に該当フィールドが
+無く、モニタ解像度を問う口も無い）。コンポジタ側で当てる。Raspberry Pi OS
+trixie の既定セッションは labwc なので、ウィンドウルールで当てる。
+
+**設定は `pi/labwc-rc.xml` にあり、`tools/build-pi.sh` が
+`~/.config/labwc/rc.xml` へ配る。** 手で置かないこと。
+
+```xml
+<windowRules>
+  <windowRule title="*">
+    <action name="ToggleFullscreen"/>
+  </windowRule>
+</windowRules>
+```
+
+配ると `killall -HUP labwc` まで走る（ログアウト不要）。**labwc は `-m`
+（merge-config）で起動しているので、これは `/etc/xdg/labwc/rc.xml` の既定に
+足される。** 素の labwc は最初に見つけた1つしか読まないので、`-m` が無い環境
+では既定をコピーしてから足すこと。
+
+**描画側は触らなくてよい。** `resize: true` + `ScaleMode::AspectRatioStretch`
+なので、1280×720 のバッファが縦横比を保ったまま画面いっぱいに伸びる。
+
+**`title="*"` にしているのは絞れないから。** minifb は
+`get_toplevel()` → `commit()`（= map）→ `set_title` の順で、**map の時点で
+タイトルが空**。`set_app_id` も一度も呼ばない。labwc は map のときにルールを
+当てるので、タイトルでも app_id でも一致しない（X11 backend も
+`XMapRaised` → `XStoreName` の順で、`XSetClassHint` を呼ばないため
+`WM_CLASS` すら無い）。この Pi は映しっぱなしの玩具なので実害は無いが、
+絞りたければ minifb に `set_app_id` か `set_fullscreen` を足した fork を
+当てるか、`wlrctl` を入れて起動後にタイトルで当てる。
+
+**カーソルはアプリ側で消している**（`window.set_cursor_visibility(false)`）。
+こちらは minifb に API があるので設定は要らない。
+
+### テレビの音量を ssh から変える
+
+**vc4hdmi の `PCM Playback Volume` は効かない。** 値は受け取るが減衰しない
+ので、`amixer -c 0 sset PCM 5%` は `[-48.40dB]` と表示しても音量が変わらない。
+`pi/asoundrc` が `softvol` を挟んでいるので、そちらを使う。
+
+```sh
+amixer -c 0 sset Softvol 15%   # 効く
+amixer -c 0 sset PCM 15%       # 効かない（触らないこと）
+```
+
+**PipeWire は動いているが当てにできない。** ALSA の `default` が PipeWire を
+経由しておらず、cpal もハードを直接叩くので `wpctl` では下がらない。
+`Softvol 0%` は完全な無音なので、音を出せない時間帯でも進行の確認はできる。
 
 ## 音源について
 
