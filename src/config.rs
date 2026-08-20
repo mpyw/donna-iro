@@ -81,7 +81,8 @@ pub struct Listen {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Recognize {
-    /// エンコーダの文脈長。下げると速く、精度は落ちる。1500 で切り詰めなし。
+    /// エンコーダの文脈長。**0 なら音声の長さから毎回決める。**
+    /// 128〜1500 を書くとその値に固定する（1500 で切り詰めなし）。
     pub audio_ctx: i32,
     /// 認識結果の先頭いくつの区間を信用するか。
     pub head_segments: usize,
@@ -116,7 +117,7 @@ impl Default for Listen {
 impl Default for Recognize {
     fn default() -> Self {
         Self {
-            audio_ctx: 1500,
+            audio_ctx: 0,
             head_segments: 2,
         }
     }
@@ -279,9 +280,13 @@ impl Config {
         if self.recognize.head_segments == 0 {
             anyhow::bail!("recognize.head_segments は1以上であること");
         }
-        if !(128..=1500).contains(&self.recognize.audio_ctx) {
+        // 0 は「音声の長さから決める」の合図。**そこだけ穴を開ける。**
+        // 1〜127 を通すと whisper 側が黙って直すので、書いた値と動きが
+        // ずれる。指定したのに効いていない、が一番たちが悪い。
+        if self.recognize.audio_ctx != 0 && !(128..=1500).contains(&self.recognize.audio_ctx) {
             anyhow::bail!(
-                "recognize.audio_ctx は 128〜1500 であること（いまは {}）",
+                "recognize.audio_ctx は 0（音声の長さから決める）か 128〜1500 で\
+                 あること（いまは {}）",
                 self.recognize.audio_ctx
             );
         }
@@ -364,8 +369,11 @@ mod tests {
         assert!(bad(|c| c.game.insert_every = 0).contains("insert_every"));
         // フィナーレが空回りする
         assert!(bad(|c| c.game.flash_ms = 0).contains("flash_ms"));
-        // whisper 側が黙って直していた範囲
+        // whisper 側が黙って直していた範囲。**0 は通す**が、その隣は通さない。
         assert!(bad(|c| c.recognize.audio_ctx = 64).contains("audio_ctx"));
+        assert!(bad(|c| c.recognize.audio_ctx = 1).contains("audio_ctx"));
+        assert!(bad(|c| c.recognize.audio_ctx = 1501).contains("audio_ctx"));
+        assert!(bad(|c| c.recognize.audio_ctx = -1).contains("audio_ctx"));
     }
 
     #[test]
@@ -373,6 +381,21 @@ mod tests {
         Config::default()
             .validate()
             .expect("既定値が自分の検証に落ちている");
+    }
+
+    /// 0 は「音声の長さから決める」の合図。既定がそれなので、
+    /// `accepts_the_shipped_defaults` だけでは固定側が検証されない。
+    #[test]
+    fn audio_ctx_takes_zero_and_the_pinned_range() {
+        let ok = |v: i32| {
+            let mut cfg = Config::default();
+            cfg.recognize.audio_ctx = v;
+            cfg.validate()
+        };
+        assert!(ok(0).is_ok(), "0 は自動の合図なので通ること");
+        assert!(ok(128).is_ok());
+        assert!(ok(384).is_ok());
+        assert!(ok(1500).is_ok());
     }
 
     /// 空文字は「指定なし」の合図。生のフィールドを読むとその意味を
