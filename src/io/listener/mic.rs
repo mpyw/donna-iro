@@ -74,7 +74,8 @@ impl Mic {
         // whisper は入力を必ず30秒に詰めてからエンコードする。
         // audio_ctx を実際の長さに見合う値まで下げると、
         // エンコーダの計算量がそのぶん減る。ここが一番効く。
-        params.set_audio_ctx(self.audio_ctx);
+        let audio_ctx = audio_ctx_for(pcm.len(), self.audio_ctx);
+        params.set_audio_ctx(audio_ctx);
 
         // 一言しか来ないので、区切らず・文脈も持たない。
         params.set_single_segment(true);
@@ -113,7 +114,7 @@ impl Mic {
             "  認識 {:.2}秒（音声 {:.1}秒 / audio_ctx {}）→ {:?}",
             started.elapsed().as_secs_f32(),
             pcm.len() as f32 / WHISPER_SR as f32,
-            self.audio_ctx,
+            audio_ctx,
             text.trim()
         );
         Some(text)
@@ -167,8 +168,88 @@ fn load_model(cfg: &Config) -> Result<WhisperContext> {
     }
 }
 
+/// 30秒 = 1500 なので、**1秒あたり 50。**
+const CTX_PER_SEC: i32 = 50;
+/// 端の畳み込みで欠けるぶんと、測り損ねたぶんの余裕（1秒ぶん）。
+const CTX_MARGIN: i32 = CTX_PER_SEC;
+/// これより下は削っても速くならないので刻まない。config の下限と揃えてある。
+const CTX_MIN: i32 = 128;
+/// whisper の上限（= 30秒、切り詰めなし）。
+const CTX_MAX: i32 = 1500;
+
+/// 音声の長さから `audio_ctx` を決める。
+///
+/// **パディングには情報が無い。** whisper は必ず30秒に詰めてからエンコード
+/// するが、実際に鳴ったぶんを覆っていれば残りを見る意味は無く、覆う範囲なら
+/// 精度は落ちない。落ちるのは実音声より短く切ったときだけ。
+///
+/// ラズパイ実測（音声 2.0〜2.3秒、大人の声）:
+///
+/// ```text
+/// audio_ctx 1500 → 2.79秒 / 2.72秒   判定 あか / ぜんぶ
+/// audio_ctx  384 → 0.66秒 / 0.78秒   判定 あか / ぜんぶ（同じ）
+/// ```
+///
+/// `pinned` が 0 でなければそれをそのまま使う。**外したときに固定へ戻せる
+/// 逃げ道を残す**ため。子どもの声で精度が出なかったとき、モデルを大きく
+/// するよりここを戻すほうが効いた、という別の実測がある。
+fn audio_ctx_for(samples: usize, pinned: i32) -> i32 {
+    if pinned != 0 {
+        return pinned;
+    }
+    let secs = samples as f32 / WHISPER_SR as f32;
+    let need = (secs * CTX_PER_SEC as f32).ceil() as i32;
+    need.saturating_add(CTX_MARGIN).clamp(CTX_MIN, CTX_MAX)
+}
+
 fn threads() -> i32 {
     std::thread::available_parallelism()
         .map(|n| n.get() as i32)
         .unwrap_or(4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **固定されていたらそれを使う。** 導出が常に勝つと、精度が出なかった
+    /// ときに戻す先が無くなる。
+    #[test]
+    fn a_pinned_value_wins() {
+        assert_eq!(audio_ctx_for(WHISPER_SR as usize * 2, 1500), 1500);
+        assert_eq!(audio_ctx_for(WHISPER_SR as usize * 2, 384), 384);
+    }
+
+    /// 1秒あたり 50 に余裕を足したぶん。
+    #[test]
+    fn derives_from_the_length_plus_a_margin() {
+        let secs = |s: f32| (WHISPER_SR as f32 * s) as usize;
+        assert_eq!(audio_ctx_for(secs(2.0), 0), 150);
+        assert_eq!(audio_ctx_for(secs(2.2), 0), 160);
+    }
+
+    /// **実音声を必ず覆うこと。** ここが割れると答えの尻が切れる。
+    /// 覆えているかは「長さ×50 以上か」で見る。
+    #[test]
+    fn always_covers_the_audio_it_is_given() {
+        for tenths in 1..=300 {
+            let secs = tenths as f32 / 10.0;
+            let samples = (WHISPER_SR as f32 * secs) as usize;
+            let ctx = audio_ctx_for(samples, 0);
+            let need = (secs * CTX_PER_SEC as f32).ceil() as i32;
+            assert!(
+                ctx >= need,
+                "{secs}秒 は {need} 要るのに {ctx} しか見ていない"
+            );
+        }
+    }
+
+    /// 短すぎるものは刻まず、長すぎるものは whisper の上限で止まる。
+    #[test]
+    fn stays_inside_the_range_whisper_accepts() {
+        assert_eq!(audio_ctx_for(0, 0), CTX_MIN);
+        assert_eq!(audio_ctx_for(WHISPER_SR as usize / 10, 0), CTX_MIN);
+        // 30秒を超えて渡されても、whisper が受ける上限で止まる。
+        assert_eq!(audio_ctx_for(WHISPER_SR as usize * 60, 0), CTX_MAX);
+    }
 }
