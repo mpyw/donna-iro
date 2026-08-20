@@ -122,6 +122,15 @@ fn main() -> Result<()> {
             drop(again_rx);
             Box::new(io::control::Never)
         } else {
+            // テレビのリモコン（CEC）からも「もう1回」を受ける。**送り手が
+            // 1本増えるだけ**で、受け口から下は何も変わらない。
+            //
+            // minifb では受けられない。Bravia の決定ボタンは KEY_OK で来て、
+            // `minifb::Key` に OK が無いため一生 Space/Enter にならない。
+            match io::control::watch_remote(&again_tx) {
+                0 => eprintln!("  リモコン なし（マウスとキーボードで操作）"),
+                n => eprintln!("  リモコン {n}台ぶん見張る"),
+            }
             Box::new(io::control::Channel(again_rx))
         };
         // ゲーム側が落ちたことを main へ伝える口。**これが無いと、音源や
