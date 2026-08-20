@@ -1,0 +1,20 @@
+# ssh から効く音量つまみを作る。
+# vc4hdmi の PCM Playback Volume は値を持つだけで減衰しないので、
+# softvol でソフト側で下げる。カード番号は差し替えでずれるので名前で指す。
+pcm.softvol {
+    type softvol
+    slave.pcm "plughw:CARD=vc4hdmi0,DEV=0"
+    control { name "Softvol" card "vc4hdmi0" }
+    max_dB 0.0
+    min_dB -60.0
+}
+
+# 再生と録音で行き先が違うので asym で分ける。
+# capture を書いておかないと "capture slave is not defined" が出る。
+pcm.!default {
+    type asym
+    playback.pcm "plug:softvol"
+    capture.pcm  "plug:hw:CARD=V15AF,DEV=0"
+}
+
+ctl.!default { type hw card "vc4hdmi0" }

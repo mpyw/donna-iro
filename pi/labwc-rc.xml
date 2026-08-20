@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<labwc_config>
+
+  <!-- 開いたウィンドウを全画面にする。テレビに映す玩具（donna-iro）用。
+       この Pi は donna-iro を映しっぱなしにする前提なので、当たる範囲が
+       広くても実害が無い。
+
+       **なぜタイトルで絞れないか。** minifb は
+         xdg_surface.get_toplevel() → surface.commit()（= map）→ set_title
+       の順で、**map の時点でタイトルが空**。しかも set_app_id を一度も
+       呼ばないので app_id も無い。labwc は map のときにルールを当てるため、
+       title="どんないろがすき" も identifier="..." も一致しない
+       （X11 backend も XMapRaised → XStoreName の順で同じ。XSetClassHint も
+       呼ばないので WM_CLASS すら無い）。だから "*" しか当てる手が無い。
+
+       **絞りたくなったら**、minifb に set_app_id か set_fullscreen を
+       足した fork を当てるか、wlrctl を入れて起動後にタイトルで当てる。
+
+       labwc は -m（merge-config）で起動しているので、これは
+       /etc/xdg/labwc/rc.xml の既定に足される。置き換えではない。
+       直したら killall -HUP labwc で読み直す（ログアウト不要）。 -->
+  <windowRules>
+    <windowRule title="*">
+      <action name="ToggleFullscreen"/>
+    </windowRule>
+  </windowRules>
+
+</labwc_config>
