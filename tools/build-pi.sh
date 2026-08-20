@@ -206,6 +206,10 @@ echo "OS 側の設定（pi/）"
 deploy_conf pi/asoundrc .asoundrc
 # labwc は SIGHUP で読み直す。動いていなければ何も起きないだけ。
 deploy_conf pi/labwc-rc.xml .config/labwc/rc.xml "killall -HUP labwc"
+# kanshi にはこのビルドで reload が無いので、入れ直す。labwc の autostart が
+# 起こすものなので、ここでは同じ環境変数を渡して立て直すだけ。
+deploy_conf pi/kanshi-config .config/kanshi/config \
+  "pkill kanshi; sleep 1; XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 setsid kanshi >/dev/null 2>&1 &"
 
 echo
 # shellcheck disable=SC2029  # $DEST_DIR は手元で展開して送るのが意図
