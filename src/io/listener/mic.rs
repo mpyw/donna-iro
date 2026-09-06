@@ -83,7 +83,30 @@ impl Mic {
         params.set_token_timestamps(false);
 
         // 色名は数トークンで終わる。上限を切って無駄な復号を止める。
-        params.set_max_tokens(16);
+        //
+        // **暴走したときの代金がここで決まる。** モデルは短い音を渡されると
+        // 同じ語を継ぎ足すことがあり、そうなると上限まで復号し切る。実測:
+        //
+        //   "ぜんぶ。"                        → 0.40秒（素直に終わった）
+        //   "あか、あか、あか、あか、あか、あ" → 0.85秒（16 を使い切った）
+        //
+        // エンコーダの条件は同じなので、差は全部この復号ぶん。**1トークン
+        // あたり 0.037秒**になる。
+        //
+        // **上限は繰り返しの形から逆算した。** どれも 16 で切れているので、
+        // 単位あたりのトークン数が読める:
+        //
+        //   "まらさき、まらさき、まらさき、ま" = 3×5 + 1 → 「まらさき、」= 5
+        //   "あか、あか、あか、あか、あか、あ" = 5×3 + 1 → 「あか、」    = 3
+        //
+        // かな1文字が1トークン、句読点が1トークン。正しい答えの最長は
+        // 「むらさき。」「きみどり。」「おれんじ。」「みずいろ。」の 5。
+        //
+        // **切れる側に倒してある。** 5 を超える出力は繰り返しか幻覚しか
+        // 無く、そちらは 0.037秒/トークンで高い。逆に切れても損は小さい。
+        // 実際に "まらさき" が編集距離 2 で むらさき に当たっているので、
+        // "むらさ" でも当たる（`matcher.rs`）。**無反応にはならない。**
+        params.set_max_tokens(5);
 
         // 温度を上げて何度もやり直すフォールバックを止める。
         // 失敗したら編集距離マッチに任せるほうが速い。
@@ -141,8 +164,14 @@ impl Listener for Mic {
 ///
 /// `paths.model`（`DONNA_IRO_PATHS__MODEL`）を指定すればファイルから読む。
 /// 埋め込みビルドでもこれが優先されるので、別のモデルを試したいときに使える。
+/// モデルを読む。
+///
+/// **どれを読んだかは必ず出す。** 環境変数で差し替えられるので、出さないと
+/// ログを見ても base と tiny のどちらの数字なのか分からない。実際に速度を
+/// 比べていて、それが分からず判断できなくなった。
 fn load_model(cfg: &Config) -> Result<WhisperContext> {
     if let Some(path) = cfg.paths.model() {
+        eprintln!("  モデル {path}");
         return WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .with_context(|| format!("モデルを読めない: {path}"));
     }
@@ -151,6 +180,7 @@ fn load_model(cfg: &Config) -> Result<WhisperContext> {
     // 読み取り専用の静的領域をそのまま渡してよい。
     #[cfg(feature = "embed-model")]
     {
+        eprintln!("  モデル 埋め込み（base）");
         const MODEL: &[u8] =
             include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ggml-base.bin"));
         return WhisperContext::new_from_buffer_with_params(
@@ -163,6 +193,7 @@ fn load_model(cfg: &Config) -> Result<WhisperContext> {
     #[cfg(not(feature = "embed-model"))]
     {
         let path = "models/ggml-base.bin";
+        eprintln!("  モデル {path}（既定）");
         WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .with_context(|| format!("モデルを読めない: {path}（tools/fetch-model.sh で取得）"))
     }
