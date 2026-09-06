@@ -11,6 +11,13 @@ use crate::app::Control;
 pub struct Stdin;
 
 impl Control for Stdin {
+    /// **ターミナルには「やめる」の口が無い。** 標準入力は
+    /// `wait_for_again` が塞いでいて、歌っている間は読めない。
+    /// 途中でやめたいなら Ctrl-C でよい（テレビの前ではない構成なので）。
+    fn stop_requested(&mut self) -> bool {
+        false
+    }
+
     fn wait_for_again(&mut self) -> bool {
         print!("  もう1回？ [Enter=つづける / Ctrl-D=おわり] > ");
         if std::io::stdout().flush().is_err() {

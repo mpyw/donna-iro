@@ -34,6 +34,10 @@ use super::matcher::Matcher;
 use crate::app::{Answer, Color, Control, Cue, Frame, Heard, Listener, Player, Screen};
 use crate::config::Config;
 
+/// 「やめる」を見に行く間隔。**歌の途中で抜けるので細かく見る。**
+/// 30fps の描画より粗い刻みだと、押してから止まるまでが目に見える。
+const POLL: Duration = Duration::from_millis(50);
+
 pub struct Game {
     player: Box<dyn Player>,
     screen: Box<dyn Screen>,
@@ -84,13 +88,44 @@ impl Game {
         }
     }
 
+    /// 鳴らして、鳴り終わるまで待つ。
+    ///
+    /// **待っている間に「やめる」を見る。** 来たら鳴っている音を止めて
+    /// すぐ返る。止めないと画面だけ切り替わって歌が流れ続ける。
+    ///
+    /// `quiet` が真なら、末尾の無音を待たずに音が鳴り止んだ時点で返る。
+    /// `question.wav` の合いの手枠がそこに入っていて、応答の窓になる。
+    ///
+    /// 戻り値は**遊びを続けてよいか**。
+    fn sound(&mut self, cue: Cue, quiet: bool) -> Result<bool> {
+        let timing = self.player.begin(cue)?;
+        let end = Instant::now() + if quiet { timing.audible } else { timing.total };
+        loop {
+            if self.control.stop_requested() {
+                self.player.silence();
+                return Ok(false);
+            }
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(true);
+            }
+            std::thread::sleep(POLL.min(left));
+        }
+    }
+
     /// イントロから「ぜんぶ！」のフィナーレまで、ひと続き。
     ///
     /// 周回数はここで閉じているので、もう1回のたびに区切りの周期も
     /// 頭から数え直す。前回の続きから間奏が来ると唐突になる。
     fn play_through(&mut self) -> Result<bool> {
+        // **待っている間に押されたぶんは捨てる。** 「もう1回」の画面で
+        // 戻るを押していたら、始めた瞬間に抜けてしまう。
+        let _ = self.control.stop_requested();
+
         self.screen.show(Frame::palette());
-        self.player.play(Cue::Intro)?;
+        if !self.sound(Cue::Intro, false)? {
+            return Ok(true);
+        }
 
         // 「ぜんぶ！」と言うまで無限に続く。何度でも好きな色を
         // 答えられるのがこの遊びの本体なので、回数の上限は設けない。
@@ -103,7 +138,9 @@ impl Game {
 
             // 質問は**鳴り止んだ時点で返る**。末尾の合いの手枠は
             // 無音のまま裏で流れ続け、そこが応答の窓になる。
-            self.player.play_until_quiet(Cue::Question)?;
+            if !self.sound(Cue::Question, true)? {
+                return Ok(true);
+            }
 
             let answer = match self.listener.hear(self.listen_max)? {
                 Heard::Said(text) => {
@@ -124,6 +161,13 @@ impl Game {
                 Heard::Closed => return Ok(false),
             };
 
+            // **聞き取りの間に押されたぶんもここで拾う。** 録音は止められ
+            // ないので、抜けるのは窓が閉じたあと（最大 listen.max_seconds
+            // ぶん遅れる）。歌の途中は上の `sound` が即座に抜ける。
+            if self.control.stop_requested() {
+                return Ok(true);
+            }
+
             if answer == Some(Answer::All) {
                 self.finale()?;
                 return Ok(true);
@@ -139,7 +183,9 @@ impl Game {
                 _ => Color::random(),
             };
             self.screen.show(Frame::Single(color));
-            self.player.play(Cue::Color(color))?;
+            if !self.sound(Cue::Color(color), false)? {
+                return Ok(true);
+            }
 
             // 3周に1回、区切りを挟む。同じ質問と節の往復だけだと単調になる。
             // 挟むものはブリッジと間奏を交互に入れ替える。同じ区切りが
@@ -149,19 +195,25 @@ impl Game {
 
             // 節の最終小節。間奏を launch する助走はアウフタクトで
             // この小節に属するので、間奏へ向かうときだけ差し替える。
-            self.player.play(if interlude_next {
+            let tail = if interlude_next {
                 Cue::TailLead
             } else {
                 Cue::Tail
-            })?;
+            };
+            if !self.sound(tail, false)? {
+                return Ok(true);
+            }
 
             if insert {
                 self.screen.show(Frame::palette());
-                self.player.play(if interlude_next {
+                let between = if interlude_next {
                     Cue::Interlude
                 } else {
                     Cue::Bridge
-                })?;
+                };
+                if !self.sound(between, false)? {
+                    return Ok(true);
+                }
             }
         }
     }
@@ -176,6 +228,12 @@ impl Game {
         let end = Instant::now() + timing.total;
         let mut order = Color::ALL;
         while Instant::now() < end {
+            // **フィナーレも途中で抜けられる。** 行き先は「もう1回」の
+            // 画面で、最後まで鳴らした場合と同じなので、返り値は要らない。
+            if self.control.stop_requested() {
+                self.player.silence();
+                break;
+            }
             order = shuffle(&order);
             self.screen.show(Frame::Palette(order));
             let left = end.saturating_duration_since(Instant::now());
@@ -216,22 +274,22 @@ mod tests {
 
     /// 鳴らした順を記録するだけ。長さ0なので待ち時間が消える。
     #[derive(Clone, Default)]
-    struct Tape(Rc<RefCell<Vec<Cue>>>);
+    struct Tape {
+        cues: Rc<RefCell<Vec<Cue>>>,
+        /// 止めた回数。**画面だけ切り替えて鳴らし続ける事故を捕まえる。**
+        silenced: Rc<RefCell<usize>>,
+    }
 
     impl Player for Tape {
-        fn play(&self, cue: Cue) -> Result<()> {
-            self.0.borrow_mut().push(cue);
-            Ok(())
-        }
-        fn play_until_quiet(&self, cue: Cue) -> Result<()> {
-            self.play(cue)
-        }
         fn begin(&self, cue: Cue) -> Result<Timing> {
-            self.play(cue)?;
+            self.cues.borrow_mut().push(cue);
             Ok(Timing {
                 total: Duration::ZERO,
                 audible: Duration::ZERO,
             })
+        }
+        fn silence(&self) {
+            *self.silenced.borrow_mut() += 1;
         }
     }
 
@@ -258,12 +316,36 @@ mod tests {
         fn show(&mut self, _frame: Frame) {}
     }
 
-    /// `n` 回だけ「もう1回」に応える。
+    /// `n` 回だけ「もう1回」に応える。やめるとは言わない。
     struct Again(usize);
     impl Control for Again {
+        fn stop_requested(&mut self) -> bool {
+            false
+        }
         fn wait_for_again(&mut self) -> bool {
             let more = self.0 > 0;
             self.0 = self.0.saturating_sub(1);
+            more
+        }
+    }
+
+    /// `after` 回訊かれたところで「やめる」と言い、そのあと
+    /// 「もう1回」には `again` 回だけ応える。
+    struct StopAfter {
+        after: usize,
+        again: usize,
+    }
+    impl Control for StopAfter {
+        fn stop_requested(&mut self) -> bool {
+            if self.after == 0 {
+                return false;
+            }
+            self.after -= 1;
+            self.after == 0
+        }
+        fn wait_for_again(&mut self) -> bool {
+            let more = self.again > 0;
+            self.again = self.again.saturating_sub(1);
             more
         }
     }
@@ -280,8 +362,42 @@ mod tests {
         )
         .run()
         .unwrap();
-        let cues = tape.0.borrow().clone();
+        let cues = tape.cues.borrow().clone();
         cues
+    }
+
+    /// **「戻る」で歌の途中から「もう1回」へ跳ぶ。** 終わりではないので、
+    /// そのあと続けると言われればもう一周する。
+    #[test]
+    fn stopping_midway_jumps_to_the_again_screen() {
+        let tape = Tape::default();
+        Game::new(
+            Box::new(tape.clone()),
+            // 2周目は「ぜんぶ」で素直に畳ませる。1周目は台本まで届かない。
+            Box::new(Script(vec![Some("ぜんぶ")].into_iter())),
+            Box::new(Blind),
+            // 3回目に訊かれたところでやめる。そのあと1回だけ続ける。
+            Box::new(StopAfter { after: 3, again: 1 }),
+            &Config::default(),
+        )
+        .run()
+        .unwrap();
+
+        // **質問の途中で抜けて、もう1周まわっている。** 終わりではなく
+        // 「もう1回」の画面へ跳んだ、というのがこの並びの意味。
+        assert_eq!(
+            *tape.cues.borrow(),
+            [
+                Cue::Intro,
+                Cue::Question, // ← ここで「戻る」
+                Cue::Intro,    // ← 続けると言われて2周目
+                Cue::Question,
+                Cue::Finale,
+            ]
+        );
+        // **鳴っている音を止めていること。** 止めないと画面だけ切り替わって
+        // 歌が流れ続ける。
+        assert_eq!(*tape.silenced.borrow(), 1, "止めていない");
     }
 
     #[test]
@@ -325,7 +441,7 @@ mod tests {
         .run()
         .unwrap();
 
-        let cues = tape.0.borrow().clone();
+        let cues = tape.cues.borrow().clone();
         assert_eq!(
             cues,
             [Cue::Intro, Cue::Question],

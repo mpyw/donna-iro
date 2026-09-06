@@ -6,6 +6,11 @@ use crate::app::Control;
 pub struct Never;
 
 impl Control for Never {
+    /// `--once` は最後まで鳴らして終わる。途中でやめる口は持たない。
+    fn stop_requested(&mut self) -> bool {
+        false
+    }
+
     fn wait_for_again(&mut self) -> bool {
         false
     }
