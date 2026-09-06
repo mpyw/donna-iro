@@ -10,38 +10,35 @@ use crate::io::audio::Clip;
 pub struct Speakers {
     _stream: rodio::OutputStream,
     handle: rodio::OutputStreamHandle,
+    /// 今鳴っているもの。**`detach` していた頃は止められなかった。**
+    /// 「戻る」で歌を切るために手元に残す。
+    ///
+    /// `Player` は `&self` しか渡さないので内側で可変にする。`Speakers`
+    /// は1つのスレッドの中だけで使う（rodio が `!Send`）ため、
+    /// `RefCell` で足りる。
+    playing: std::cell::RefCell<Option<rodio::Sink>>,
 }
 
 impl Speakers {
     pub fn new() -> Result<Self> {
         let (_stream, handle) =
             rodio::OutputStream::try_default().context("出力デバイスを開けない")?;
-        Ok(Self { _stream, handle })
+        Ok(Self {
+            _stream,
+            handle,
+            playing: std::cell::RefCell::new(None),
+        })
     }
 }
 
 impl Player for Speakers {
-    fn play(&self, cue: Cue) -> Result<()> {
-        std::thread::sleep(self.begin(cue)?.total);
-        Ok(())
-    }
-
-    /// **音が鳴り止んだ時点で返す。** 末尾の無音は裏で流したままにする。
-    ///
-    /// `question.wav` の末尾には原曲の合いの手枠が約1秒ぶん無音で入って
-    /// いる。そこがまさに子どもが答える瞬間なので、鳴らし切ってから
-    /// 聞き始めると完全に手遅れになる。
-    ///
-    /// 無音の長さは素材から測る。決め打ちにすると、つくよみちゃんの音源に
-    /// 差し替えたときに合わなくなる。
-    fn play_until_quiet(&self, cue: Cue) -> Result<()> {
-        std::thread::sleep(self.begin(cue)?.audible);
-        Ok(())
-    }
-
     /// **鳴らし始めて長さだけ返す。待たない。**
     ///
-    /// 鳴っている間に画面を動かしたいときに使う。
+    /// 待つのは `Game` の側。そうしないと待っている間に「やめる」を
+    /// 見られない（`app::player` を見ること）。
+    ///
+    /// 末尾の無音の長さは素材から測る。決め打ちにすると、つくよみちゃんの
+    /// 音源に差し替えたときに合わなくなる。
     fn begin(&self, cue: Cue) -> Result<Timing> {
         let clip = Clip::load(cue)?;
         let timing = Timing {
@@ -50,8 +47,18 @@ impl Player for Speakers {
         };
         let sink = rodio::Sink::try_new(&self.handle)?;
         sink.append(clip.into_source());
-        // 呼び出し側が待つので、こちらは裏で流し切らせる。
-        sink.detach();
+        // **前のものを置き換える。** ここで落ちる古い Sink は drop で
+        // 止まるので、鳴り残りが重なることはない。
+        *self.playing.borrow_mut() = Some(sink);
         Ok(timing)
+    }
+
+    /// 鳴っているものを止める。**何も鳴っていなければ何もしない。**
+    fn silence(&self) {
+        // 手放すだけで止まる（`Sink` は drop で止める）が、`stop` を
+        // 呼んでおくほうが意図がはっきりする。
+        if let Some(sink) = self.playing.borrow_mut().take() {
+            sink.stop();
+        }
     }
 }

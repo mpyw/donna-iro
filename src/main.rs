@@ -118,8 +118,11 @@ fn main() -> Result<()> {
         let (tx, rx) = std::sync::mpsc::channel();
         // 逆向きに1本。フレームを送るのと向きだけが違う。
         let (again_tx, again_rx) = std::sync::mpsc::channel();
+        // やめるのは別の口。**同じ口に混ぜると、やめる合図で再開する。**
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel();
         let control: Box<dyn Control> = if opts.once {
             drop(again_rx);
+            drop(stop_rx);
             Box::new(io::control::Never)
         } else {
             // テレビのリモコン（CEC）からも「もう1回」を受ける。**送り手が
@@ -127,11 +130,14 @@ fn main() -> Result<()> {
             //
             // minifb では受けられない。Bravia の決定ボタンは KEY_OK で来て、
             // `minifb::Key` に OK が無いため一生 Space/Enter にならない。
-            match io::control::watch_remote(&again_tx) {
+            match io::control::watch_remote(&again_tx, &stop_tx) {
                 0 => eprintln!("  リモコン なし（マウスとキーボードで操作）"),
                 n => eprintln!("  リモコン {n}台ぶん見張る"),
             }
-            Box::new(io::control::Channel(again_rx))
+            Box::new(io::control::Channel {
+                again: again_rx,
+                stop: stop_rx,
+            })
         };
         // ゲーム側が落ちたことを main へ伝える口。**これが無いと、音源や
         // デバイスの障害で死んでも終了コードが0になる。** systemd の

@@ -54,7 +54,8 @@ const PRESSED: i32 = 1;
 /// 他社が `KEY_SELECT` や `KEY_ENTER` を出す余地はある。**どれで来ても同じ
 /// 意味なので、広く受けて構わない。** 取りこぼすほうが損。
 ///
-/// 逆に上下左右と `KEY_EXIT` は入れない。**押し間違いで再開させない。**
+/// 逆に上下左右は入れない。**押し間違いで再開させない。**
+/// `KEY_EXIT` は別の意味（`STOP`）を持たせてある。
 const AGAIN: &[u16] = &[
     352, // KEY_OK
     353, // KEY_SELECT
@@ -62,6 +63,26 @@ const AGAIN: &[u16] = &[
     96,  // KEY_KPENTER
     57,  // KEY_SPACE
 ];
+
+/// 「この回はやめる」と読むキー。
+///
+/// **再開ではなく中断。** 歌の途中で押されたら音を止めて「もう1回」の
+/// 画面へ跳ぶ。Bravia の「戻る」は `KEY_EXIT` で来た（実測）。
+///
+/// 上下左右は入れない。**歌の途中で誤って止めない**ため。
+const STOP: &[u16] = &[
+    174, // KEY_EXIT
+    158, // KEY_BACK
+];
+
+/// 押されたキーの意味。
+#[derive(Debug, PartialEq, Eq)]
+pub enum Press {
+    /// もう1回。
+    Again,
+    /// この回はやめる。
+    Stop,
+}
 
 /// 見張るデバイスの名前。
 ///
@@ -74,13 +95,13 @@ fn wanted(name: &str) -> bool {
     name.starts_with("vc4-hdmi") && !name.contains("Jack")
 }
 
-/// 1件ぶんの生データが「もう1回」の合図か。
+/// 1件ぶんの生データを意味に直す。
 ///
 /// **離上と自動連打は数えない。** 押している間ずっと真になると、
 /// 長押し1回で何度も飛ぶ。
-fn again_pressed(rec: &[u8]) -> bool {
+fn pressed(rec: &[u8]) -> Option<Press> {
     if rec.len() < EVENT_SIZE {
-        return false;
+        return None;
     }
     let typ = u16::from_ne_bytes([rec[TYPE_AT], rec[TYPE_AT + 1]]);
     let code = u16::from_ne_bytes([rec[CODE_AT], rec[CODE_AT + 1]]);
@@ -90,7 +111,16 @@ fn again_pressed(rec: &[u8]) -> bool {
         rec[VALUE_AT + 2],
         rec[VALUE_AT + 3],
     ]);
-    typ == EV_KEY && value == PRESSED && AGAIN.contains(&code)
+    if typ != EV_KEY || value != PRESSED {
+        return None;
+    }
+    if AGAIN.contains(&code) {
+        return Some(Press::Again);
+    }
+    if STOP.contains(&code) {
+        return Some(Press::Stop);
+    }
+    None
 }
 
 /// 見張る `/dev/input/eventN` を集める。
@@ -121,7 +151,7 @@ fn devices() -> Vec<PathBuf> {
 }
 
 /// 1つのデバイスを読み続ける。**送り先が閉じたら黙って終わる。**
-fn watch(path: PathBuf, again: Sender<()>) {
+fn watch(path: PathBuf, again: Sender<()>, stop: Sender<()>) {
     let Ok(mut file) = std::fs::File::open(&path) else {
         // 権限が無い（`input` グループに入っていない）ときにここへ来る。
         eprintln!("  ⚠ リモコンを読めない: {}", path.display());
@@ -134,8 +164,13 @@ fn watch(path: PathBuf, again: Sender<()>) {
         if file.read_exact(&mut rec).is_err() {
             return;
         }
-        if again_pressed(&rec) && again.send(()).is_err() {
-            // 待っている側がもう居ない = 遊びが終わった。
+        let sent = match pressed(&rec) {
+            Some(Press::Again) => again.send(()),
+            Some(Press::Stop) => stop.send(()),
+            None => continue,
+        };
+        if sent.is_err() {
+            // 受け手がもう居ない = 遊びが終わった。
             return;
         }
     }
@@ -146,11 +181,11 @@ fn watch(path: PathBuf, again: Sender<()>) {
 /// 0 なら、リモコンからは何も来ない（CEC が繋がっていないか、権限が無いか、
 /// Linux ではない）。**それでも遊びは続けられる**ので、呼び手は数を出す
 /// だけでよい。
-pub fn spawn(again: &Sender<()>) -> usize {
+pub fn spawn(again: &Sender<()>, stop: &Sender<()>) -> usize {
     let mut n = 0;
     for path in devices() {
-        let tx = again.clone();
-        std::thread::spawn(move || watch(path, tx));
+        let (a, s) = (again.clone(), stop.clone());
+        std::thread::spawn(move || watch(path, a, s));
         n += 1;
     }
     n
@@ -169,38 +204,58 @@ mod tests {
         rec
     }
 
-    /// Bravia の決定ボタンは `KEY_OK`。**実測した値そのもの。**
+    /// Bravia の決定は `KEY_OK`、戻るは `KEY_EXIT`。**実測した値そのもの。**
     #[test]
-    fn the_tv_ok_button_counts() {
-        assert!(again_pressed(&event(EV_KEY, 352, PRESSED)));
+    fn the_two_buttons_measured_on_the_bravia() {
+        assert_eq!(pressed(&event(EV_KEY, 352, PRESSED)), Some(Press::Again));
+        assert_eq!(pressed(&event(EV_KEY, 174, PRESSED)), Some(Press::Stop));
     }
 
     /// 他社が別のキーを出しても同じ意味に読む。
     #[test]
-    fn other_ways_of_saying_ok_count_too() {
+    fn other_ways_of_saying_the_same_thing() {
         for code in AGAIN {
-            assert!(
-                again_pressed(&event(EV_KEY, *code, PRESSED)),
+            assert_eq!(
+                pressed(&event(EV_KEY, *code, PRESSED)),
+                Some(Press::Again),
+                "code={code} を取りこぼしている"
+            );
+        }
+        for code in STOP {
+            assert_eq!(
+                pressed(&event(EV_KEY, *code, PRESSED)),
+                Some(Press::Stop),
                 "code={code} を取りこぼしている"
             );
         }
     }
 
-    /// **離上と連打は数えない。** 長押し1回で何度も飛ぶと、
+    /// **同じキーが両方の意味になってはいけない。** 押したら止まって
+    /// すぐ再開する、という挙動になる。
+    #[test]
+    fn no_key_means_both_things() {
+        for code in AGAIN {
+            assert!(!STOP.contains(code), "code={code} が両方に入っている");
+        }
+    }
+
+    /// **離上と自動連打は数えない。** 長押し1回で何度も飛ぶと、
     /// 待ちに入る前の掃除を抜けてしまう。
     #[test]
     fn only_the_moment_it_goes_down_counts() {
-        assert!(!again_pressed(&event(EV_KEY, 352, 0)), "離上");
-        assert!(!again_pressed(&event(EV_KEY, 352, 2)), "自動連打");
+        assert_eq!(pressed(&event(EV_KEY, 352, 0)), None, "離上");
+        assert_eq!(pressed(&event(EV_KEY, 352, 2)), None, "自動連打");
+        assert_eq!(pressed(&event(EV_KEY, 174, 0)), None, "離上");
     }
 
-    /// 十字キーと戻るで再開してはいけない。**押し間違いで戻される。**
+    /// 十字キーと音量では何も起きない。**歌の途中で誤って止めない。**
     #[test]
-    fn the_other_buttons_do_not_restart_the_game() {
-        for code in [103u16, 105, 106, 108, 174, 158, 113, 114, 115] {
-            assert!(
-                !again_pressed(&event(EV_KEY, code, PRESSED)),
-                "code={code} で再開してはいけない"
+    fn the_other_buttons_do_nothing() {
+        for code in [103u16, 105, 106, 108, 113, 114, 115, 402, 403] {
+            assert_eq!(
+                pressed(&event(EV_KEY, code, PRESSED)),
+                None,
+                "code={code} で何かが起きてはいけない"
             );
         }
     }
@@ -208,15 +263,15 @@ mod tests {
     /// キー以外の種目は見ない（`EV_SYN` や `EV_MSC` が同じ口から来る）。
     #[test]
     fn ignores_events_that_are_not_keys() {
-        assert!(!again_pressed(&event(0, 352, PRESSED)), "EV_SYN");
-        assert!(!again_pressed(&event(4, 352, PRESSED)), "EV_MSC");
+        assert_eq!(pressed(&event(0, 352, PRESSED)), None, "EV_SYN");
+        assert_eq!(pressed(&event(4, 352, PRESSED)), None, "EV_MSC");
     }
 
     /// 短いものを渡されても落ちない。
     #[test]
     fn a_truncated_record_is_not_a_press() {
-        assert!(!again_pressed(&[]));
-        assert!(!again_pressed(&[0u8; EVENT_SIZE - 1]));
+        assert_eq!(pressed(&[]), None);
+        assert_eq!(pressed(&[0u8; EVENT_SIZE - 1]), None);
     }
 
     /// 抜き差しを報せるスイッチはキーを出さないので見張らない。
